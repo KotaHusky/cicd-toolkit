@@ -96,19 +96,27 @@ jobs:
           echo "DIRECTORY=$DIRECTORY" >> $GITHUB_ENV
           echo "EXCLUDE=$EXCLUDE" >> $GITHUB_ENV
 
-      - name: Run Code Analysis with Configured Inputs
+      - name: Run Code Analysis and Capture Output
+        id: code_analysis
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: node .github/actions/code_analysis_with_gitignore_exclude.js
+        run: |
+          # Capture output in a variable
+          ANALYSIS_OUTPUT=$(node .github/actions/code_analysis_with_gitignore_exclude.js)
+          echo "ANALYSIS_OUTPUT=$ANALYSIS_OUTPUT" >> $GITHUB_OUTPUT
 
       - name: Post or Update Code Analysis Comment
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           COMMENT_IDENTIFIER="<!-- code-analysis-comment -->"
-          COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$(node .github/actions/code_analysis_with_gitignore_exclude.js)"
+          
+          # Access the analysis output from the step output
+          COMMENT_RESULTS="${{ steps.code_analysis.outputs.ANALYSIS_OUTPUT }}"
 
-          # Find any previous AI review comment and delete it to keep the latest result at the top
+          COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$COMMENT_RESULTS"
+
+          # Find and delete previous comments
           previous_comment_ids=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
             | jq -r ".[] | select(.body | contains(\"$COMMENT_IDENTIFIER\")) | .id")
 
@@ -116,6 +124,6 @@ jobs:
             gh api repos/${{ github.repository }}/issues/comments/$comment_id -X DELETE
           done
 
-          # Post the new analysis comment
+          # Post the new, cleaned-up comment
           gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
             -f body="$COMMENT_CONTENT"
