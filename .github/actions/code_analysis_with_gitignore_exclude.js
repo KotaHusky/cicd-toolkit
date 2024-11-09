@@ -1,17 +1,61 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const crypto = require('crypto');
 const minimatch = require('minimatch');
 
 const approvedTypes = process.env.APPROVED_TYPES.split(',');
 const maxSizeBytes = parseInt(process.env.MAX_SIZE_MB) * 1024 * 1024;
-const maxCallsPerHour = parseInt(process.env.MAX_CALLS_PER_HOUR);
+const maxCallsPerHour = parseInt(process.env.MAX_CALLS_PER_HOUR) || 3;
 const directory = process.env.DIRECTORY;
 const excludePatterns = process.env.EXCLUDE ? process.env.EXCLUDE.split(',') : [];
 const openaiApiKey = process.env.OPENAI_API_KEY;
-const callCountFile = '.github/actions/hourly_call_count.json';
+const callCountFile = path.join('.github/actions/hourly_call_count.json');
+const oneHour = 60 * 60 * 1000;
 
-// Check if a file path matches any of the exclude patterns
+// Function to generate a unique hash for each API call
+function generateUniqueHash() {
+  return crypto.createHash('md5').update(Date.now().toString() + Math.random().toString()).digest('hex').slice(0, 12);
+}
+
+// Function to retrieve current call count, filtering out entries older than one hour
+function getHourlyCallCount() {
+  if (!fs.existsSync(callCountFile)) {
+    return { count: 0, calls: [] };
+  }
+
+  const data = JSON.parse(fs.readFileSync(callCountFile, 'utf8'));
+  const currentTime = Date.now();
+
+  // Filter to keep only calls within the last hour
+  const recentCalls = data.calls.filter(call => currentTime - call.timestamp < oneHour);
+
+  return {
+    count: recentCalls.length,
+    calls: recentCalls
+  };
+}
+
+// Function to add a new API call to the call count file and apply the sliding window
+function updateHourlyCallCount() {
+  const currentData = getHourlyCallCount();
+  const newCall = {
+    hash: generateUniqueHash(),
+    timestamp: Date.now()
+  };
+
+  // Add new call and reapply the sliding window to keep only the recent calls
+  currentData.calls.push(newCall);
+  const recentCalls = currentData.calls.filter(call => Date.now() - call.timestamp < oneHour);
+
+  // Update count based on the filtered recent calls
+  currentData.count = recentCalls.length;
+  currentData.calls = recentCalls;
+
+  fs.writeFileSync(callCountFile, JSON.stringify(currentData, null, 2));
+}
+
+// Function to check if a file path matches any of the exclude patterns
 function isExcluded(filePath) {
   return excludePatterns.some(pattern => minimatch(filePath, pattern.trim()));
 }
@@ -49,27 +93,6 @@ function loadApprovedFiles() {
   return { combinedText, totalSize };
 }
 
-// Enforce hourly rate limiting based on timestamped call count
-function getHourlyCallCount() {
-  if (!fs.existsSync(callCountFile)) {
-    return { count: 0, timestamp: Date.now() };
-  }
-  const data = JSON.parse(fs.readFileSync(callCountFile, 'utf8'));
-
-  const currentTime = Date.now();
-  const oneHour = 60 * 60 * 1000;
-
-  if (currentTime - data.timestamp >= oneHour) {
-    return { count: 0, timestamp: currentTime };
-  }
-  return data;
-}
-
-function updateHourlyCallCount(newCount) {
-  const data = { count: newCount, timestamp: Date.now() };
-  fs.writeFileSync(callCountFile, JSON.stringify(data));
-}
-
 // Make ChatGPT API call
 async function getAIFindings(inputText) {
   const response = await axios.post(
@@ -89,7 +112,7 @@ async function getAIFindings(inputText) {
 
 // Main function to control workflow
 async function main() {
-  const { count, timestamp } = getHourlyCallCount();
+  const { count } = getHourlyCallCount();
 
   if (count >= maxCallsPerHour) {
     console.log(`Info: Maximum ChatGPT call limit of ${maxCallsPerHour} per hour reached. Skipping analysis.`);
@@ -106,7 +129,7 @@ async function main() {
     try {
       const findings = await getAIFindings(combinedText);
       console.log('AI Findings:', findings);
-      updateHourlyCallCount(count + 1);
+      updateHourlyCallCount();
     } catch (error) {
       console.error('Error during ChatGPT analysis:', error);
     }
