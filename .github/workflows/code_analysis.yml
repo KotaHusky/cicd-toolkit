@@ -30,6 +30,9 @@ jobs:
 
       - name: Load Config and Set Environment Variables
         run: node .github/actions/load_config.js >> $GITHUB_ENV
+        env:
+          INPUT_DIRECTORY: ${{ inputs.directory }}
+          INPUT_EXCLUDE: ${{ inputs.exclude }}
 
       - name: Run Code Analysis with Configured Inputs
         env:

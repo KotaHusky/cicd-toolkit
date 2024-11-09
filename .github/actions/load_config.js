@@ -13,6 +13,19 @@ try {
   process.exit(1); // Exit with failure if the config file cannot be loaded
 }
 
+// Show if input is provided from the GitHub Action, or if the default value is used
+if (process.env.INPUT_DIRECTORY) {
+  console.log(`Input directory: ${process.env.INPUT_DIRECTORY}`);
+} else {
+  console.log(`Using default directory: ${config.directory}`);
+}
+
+if (process.env.INPUT_EXCLUDE) {
+  console.log(`Input exclude: ${process.env.INPUT_EXCLUDE}`);
+} else {
+  console.log(`Using default exclude: ${config.exclude}`);
+}
+
 // Load GitHub Action inputs, which are automatically passed as environment variables
 const directoryInput = process.env.INPUT_DIRECTORY;
 const excludeInput = process.env.INPUT_EXCLUDE;
