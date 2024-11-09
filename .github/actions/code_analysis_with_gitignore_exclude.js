@@ -13,12 +13,21 @@ const openaiApiKey = process.env.OPENAI_API_KEY;
 const callCountFile = path.join('.github/actions/hourly_call_count.json');
 const oneHour = 60 * 60 * 1000;
 
-// Function to generate a unique hash for each API call
+/**
+ * Generates a unique hash for each API call.
+ *
+ * @returns {string} A unique 12-character hash.
+ */
 function generateUniqueHash() {
   return crypto.createHash('md5').update(Date.now().toString() + Math.random().toString()).digest('hex').slice(0, 12);
 }
 
-// Function to retrieve current call count, filtering out entries older than one hour
+/**
+ * Retrieves the current call count, filtering out entries older than one hour.
+ *
+ * @returns {{count: number, calls: Array<{hash: string, timestamp: number}>}}
+ * The current count and an array of recent call entries.
+ */
 function getHourlyCallCount() {
   if (!fs.existsSync(callCountFile)) {
     return { count: 0, calls: [] };
@@ -36,7 +45,9 @@ function getHourlyCallCount() {
   };
 }
 
-// Function to add a new API call to the call count file and apply the sliding window
+/**
+ * Updates the call count file with a new API call entry and applies the sliding window.
+ */
 function updateHourlyCallCount() {
   const currentData = getHourlyCallCount();
   const newCall = {
@@ -44,23 +55,32 @@ function updateHourlyCallCount() {
     timestamp: Date.now()
   };
 
-  // Add new call and reapply the sliding window to keep only the recent calls
+  // Add new call and reapply the sliding window to keep only recent calls
   currentData.calls.push(newCall);
   const recentCalls = currentData.calls.filter(call => Date.now() - call.timestamp < oneHour);
 
-  // Update count based on the filtered recent calls
+  // Update count and calls in the JSON file
   currentData.count = recentCalls.length;
   currentData.calls = recentCalls;
 
   fs.writeFileSync(callCountFile, JSON.stringify(currentData, null, 2));
 }
 
-// Function to check if a file path matches any of the exclude patterns
+/**
+ * Checks if a file path matches any of the exclude patterns.
+ *
+ * @param {string} filePath - The path of the file to check.
+ * @returns {boolean} True if the file should be excluded, false otherwise.
+ */
 function isExcluded(filePath) {
   return excludePatterns.some(pattern => minimatch(filePath, pattern.trim()));
 }
 
-// Load and filter files by approved type and exclusion patterns
+/**
+ * Loads files from the specified directory, applying filters for approved types and exclusions.
+ *
+ * @returns {{combinedText: string, totalSize: number}} The combined content of approved files and the total size.
+ */
 function loadApprovedFiles() {
   let combinedText = '';
   let totalSize = 0;
@@ -93,7 +113,12 @@ function loadApprovedFiles() {
   return { combinedText, totalSize };
 }
 
-// Make ChatGPT API call
+/**
+ * Sends code content to the ChatGPT API for analysis and logs the API response.
+ *
+ * @param {string} inputText - The code content to analyze.
+ * @returns {Promise<string>} The response from the ChatGPT API.
+ */
 async function getAIFindings(inputText) {
   const response = await axios.post(
     'https://api.openai.com/v1/chat/completions',
@@ -110,7 +135,9 @@ async function getAIFindings(inputText) {
   return response.data.choices[0].message.content;
 }
 
-// Main function to control workflow
+/**
+ * Main function to control workflow: loads files, checks rate limits, and analyzes code with ChatGPT.
+ */
 async function main() {
   const { count } = getHourlyCallCount();
 
@@ -119,21 +146,4 @@ async function main() {
     return;
   }
 
-  const { combinedText, totalSize } = loadApprovedFiles();
-
-  if (totalSize > maxSizeBytes) {
-    console.log(`Info: Total file size (${totalSize} bytes) exceeds limit of ${maxSizeBytes} bytes. Skipping analysis.`);
-  } else if (!combinedText.trim()) {
-    console.log('Info: No approved file types found. Skipping analysis.');
-  } else {
-    try {
-      const findings = await getAIFindings(combinedText);
-      console.log('AI Findings:', findings);
-      updateHourlyCallCount();
-    } catch (error) {
-      console.error('Error during ChatGPT analysis:', error);
-    }
-  }
-}
-
-main().catch(console.error);
+  const { combinedText, totalSize 
