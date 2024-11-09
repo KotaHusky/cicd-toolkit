@@ -1,19 +1,12 @@
-name: Reusable Code Analysis with ChatGPT
+name: AI Code Analysis on Comment Trigger
 
 on:
-  workflow_call:
-    inputs:
-      directory:
-        description: 'Directory to scan for code analysis'
-        required: false
-        type: string
-      exclude:
-        description: 'Comma-separated list of files or directories to exclude'
-        required: false
-        type: string
+  issue_comment:
+    types: [created]
 
 jobs:
-  analyze_code:
+  analyze_code_on_comment:
+    if: contains(github.event.comment.body, '!ai-review')
     runs-on: ubuntu-latest
 
     steps:
@@ -76,11 +69,27 @@ jobs:
           echo "MAX_CALLS_PER_HOUR=$MAX_CALLS_PER_HOUR" >> $GITHUB_ENV
           echo "DIRECTORY=$DIRECTORY" >> $GITHUB_ENV
           echo "EXCLUDE=$EXCLUDE" >> $GITHUB_ENV
-        env:
-          INPUT_DIRECTORY: ${{ inputs.directory }}
-          INPUT_EXCLUDE: ${{ inputs.exclude }}        
 
       - name: Run Code Analysis with Configured Inputs
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # Access inherited API key
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: node .github/actions/code_analysis_with_gitignore_exclude.js
+
+      - name: Post or Update Code Analysis Comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMENT_IDENTIFIER="<!-- code-analysis-comment -->"
+          COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$(cat .github/actions/live_test_log.json)"
+
+          # Find any previous AI review comment and delete it to keep the latest result at the top
+          previous_comment_ids=$(gh api repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
+            | jq -r ".[] | select(.body | contains(\"$COMMENT_IDENTIFIER\")) | .id")
+
+          for comment_id in $previous_comment_ids; do
+            gh api repos/${{ github.repository }}/issues/comments/$comment_id -X DELETE
+          done
+
+          # Post the new analysis comment
+          gh api repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
+            -f body="$COMMENT_CONTENT"
