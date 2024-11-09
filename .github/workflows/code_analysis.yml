@@ -41,15 +41,25 @@ jobs:
             exit 1
           fi
       
+          # Extract values from config file
           MAX_SIZE_MB=$(yq e '.max_size_mb' "$CONFIG_FILE")
           APPROVED_TYPES=$(yq e '.approved_types | join(" ")' "$CONFIG_FILE")
           MAX_CALLS_PER_HOUR=$(yq e '.max_calls_per_hour' "$CONFIG_FILE")
           DEFAULT_DIRECTORY=$(yq e '.directory' "$CONFIG_FILE")
           DEFAULT_EXCLUDE=$(yq e '.exclude' "$CONFIG_FILE")
-      
-          # Use inputs if provided, otherwise fallback to default config file values
-          DIRECTORY="${{ inputs.directory || DEFAULT_DIRECTORY }}"
-          EXCLUDE="${{ inputs.exclude || DEFAULT_EXCLUDE }}"
+
+          # Use input if provided, otherwise fall back to default config values
+          if [[ -n "${{ inputs.directory }}" ]]; then
+            DIRECTORY="${{ inputs.directory }}"
+          else
+            DIRECTORY="$DEFAULT_DIRECTORY"
+          fi
+
+          if [[ -n "${{ inputs.exclude }}" ]]; then
+            EXCLUDE="${{ inputs.exclude }}"
+          else
+            EXCLUDE="$DEFAULT_EXCLUDE"
+          fi
       
           # Check if required configuration fields are missing
           if [[ -z "$MAX_SIZE_MB" ]]; then
