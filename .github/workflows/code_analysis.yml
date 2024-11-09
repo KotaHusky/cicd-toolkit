@@ -103,6 +103,9 @@ jobs:
         run: |
           # Capture the output and handle multiline content with delimiters
           ANALYSIS_OUTPUT=$(node .github/actions/code_analysis_with_gitignore_exclude.js)
+          
+          echo "$ANALYSIS_OUTPUT"
+
           echo "ANALYSIS_OUTPUT<<EOF" >> $GITHUB_OUTPUT
           echo "$ANALYSIS_OUTPUT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
