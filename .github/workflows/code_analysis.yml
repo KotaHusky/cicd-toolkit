@@ -82,6 +82,12 @@ jobs:
             echo "Error: exclude is not provided as an input or in the configuration file"
             exit 1
           fi
+          
+          # Ensure the directory actually exists
+          if [[ ! -d "$DIRECTORY" ]]; then
+            echo "Error: Specified directory '$DIRECTORY' does not exist."
+            exit 1
+          fi
       
           # Set environment variables
           echo "MAX_SIZE_MB=$MAX_SIZE_MB" >> $GITHUB_ENV
