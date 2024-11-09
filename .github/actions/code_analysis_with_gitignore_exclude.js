@@ -15,11 +15,7 @@ if (!fs.existsSync(CONFIG_FILE)) {
 const config = yaml.load(fs.readFileSync(CONFIG_FILE, 'utf8'));
 
 // Parse and normalize approved types with leading dots and lowercase
-let approvedTypes = config.approved_types ? config.approved_types.split(',').map(ext => ext.trim().toLowerCase()) : [];
-
-if (approvedTypes.length === 1 && approvedTypes[0].includes(' ')) {
-  approvedTypes = approvedTypes[0].split(' ').map(ext => ext.trim().toLowerCase());
-}
+let approvedTypes = Array.isArray(config.approved_types) ? config.approved_types.map(ext => ext.trim().toLowerCase()) : [];
 
 if (approvedTypes.length === 0) {
   console.error('Error: No approved types defined in the configuration file.');
@@ -38,7 +34,8 @@ if (!directory) {
   process.exit(1); // Exit if directory is not defined
 }
 
-const excludePatterns = config.exclude ? config.exclude.split(',') : [];
+// Use exclude patterns directly as an array
+const excludePatterns = Array.isArray(config.exclude) ? config.exclude : [];
 const openaiApiKey = process.env.OPENAI_API_KEY;
 const callCountFile = path.join('.github/actions/hourly_call_count.json');
 const oneHour = 60 * 60 * 1000;
