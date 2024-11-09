@@ -101,9 +101,11 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # Capture output and encode in base64
-          ANALYSIS_OUTPUT=$(node .github/actions/code_analysis_with_gitignore_exclude.js | base64)
-          echo "ANALYSIS_OUTPUT=$ANALYSIS_OUTPUT" >> $GITHUB_OUTPUT
+          # Capture the output and handle multiline content with delimiters
+          ANALYSIS_OUTPUT=$(node .github/actions/code_analysis_with_gitignore_exclude.js)
+          echo "ANALYSIS_OUTPUT<<EOF" >> $GITHUB_OUTPUT
+          echo "$ANALYSIS_OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
   
       - name: Post or Update Code Analysis Comment
         env:
@@ -111,8 +113,8 @@ jobs:
         run: |
           COMMENT_IDENTIFIER="<!-- code-analysis-comment -->"
           
-          # Decode the base64 output to retrieve the original analysis results
-          COMMENT_RESULTS=$(echo "${{ steps.code_analysis.outputs.ANALYSIS_OUTPUT }}" | base64 --decode)
+          # Retrieve the analysis output
+          COMMENT_RESULTS="${{ steps.code_analysis.outputs.ANALYSIS_OUTPUT }}"
 
           COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$COMMENT_RESULTS"
 
