@@ -79,6 +79,11 @@ function isExcluded(filePath) {
  * @returns {{combinedText: string, totalSize: number}} The combined content of approved files and the total size.
  */
 function loadApprovedFiles() {
+  if (!fs.existsSync(directory)) {
+    console.error(`Error: Specified directory "${directory}" does not exist.`);
+    process.exit(1);
+  }
+
   let combinedText = '';
   let totalSize = 0;
 
