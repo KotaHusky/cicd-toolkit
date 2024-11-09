@@ -96,33 +96,19 @@ jobs:
           echo "DIRECTORY=$DIRECTORY" >> $GITHUB_ENV
           echo "EXCLUDE=$EXCLUDE" >> $GITHUB_ENV
 
-      - name: Run Code Analysis and Capture Output
-        id: code_analysis
+      - name: Run Code Analysis and Post Comment
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          # Run the code analysis and capture the output
-          ANALYSIS_OUTPUT=$(node .github/actions/code_analysis_with_gitignore_exclude.js)
-          
-          # Encode the output in Base64 to preserve formatting
-          ENCODED_OUTPUT=$(echo "$ANALYSIS_OUTPUT" | base64)
-          
-          # Store the encoded output in the environment
-          echo "ENCODED_OUTPUT=$ENCODED_OUTPUT" >> $GITHUB_OUTPUT
-  
-      - name: Post or Update Code Analysis Comment
-        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ENCODED_OUTPUT: ${{ env.ENCODED_OUTPUT }}
         run: |
           COMMENT_IDENTIFIER="<!-- code-analysis-comment -->"
           
-          # Decode the Base64 output
-          COMMENT_RESULTS=$(echo "${{ steps.code_analysis.outputs.ENCODED_OUTPUT }}" | base64 --decode)
+          # Run the code analysis and capture the output directly
+          ANALYSIS_OUTPUT=$(node .github/actions/code_analysis_with_gitignore_exclude.js)
           
-          COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$COMMENT_RESULTS"
+          COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$ANALYSIS_OUTPUT"
       
-          # Find and delete previous comments
+          # Find and delete previous comments with the identifier
           previous_comment_ids=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
             | jq -r ".[] | select(.body | contains(\"$COMMENT_IDENTIFIER\")) | .id")
       
