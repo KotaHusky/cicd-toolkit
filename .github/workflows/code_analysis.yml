@@ -116,10 +116,11 @@ jobs:
         run: |
           COMMENT_IDENTIFIER="<!-- code-analysis-comment -->"
 
-          # Retrieve the analysis output safely using printf
+          # Retrieve and escape the analysis output safely
           COMMENT_RESULTS="${{ steps.code_analysis.outputs.ANALYSIS_OUTPUT }}"
+          ESCAPED_COMMENT_RESULTS=$(printf "%s" "$COMMENT_RESULTS" | sed 's/"/\\"/g; s/$/\\n/')
 
-          COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$COMMENT_RESULTS"
+          COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$ESCAPED_COMMENT_RESULTS"
 
           # Find and delete previous comments
           previous_comment_ids=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
@@ -129,6 +130,6 @@ jobs:
             gh api repos/${{ github.repository }}/issues/comments/$comment_id -X DELETE
           done
 
-          # Post the new, cleaned-up comment using printf
-          printf "%s" "$COMMENT_CONTENT" | gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments -f body=-
-  
+          # Post the new, cleaned-up comment
+          gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+            -f body="$COMMENT_CONTENT"
