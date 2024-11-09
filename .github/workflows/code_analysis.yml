@@ -101,35 +101,35 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # Capture the output and handle multiline content with delimiters
+          # Run the code analysis and capture the output
           ANALYSIS_OUTPUT=$(node .github/actions/code_analysis_with_gitignore_exclude.js)
           
-          echo "$ANALYSIS_OUTPUT"
-
-          echo "ANALYSIS_OUTPUT<<EOF" >> $GITHUB_OUTPUT
-          echo "$ANALYSIS_OUTPUT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Encode the output in Base64 to preserve formatting
+          ENCODED_OUTPUT=$(echo "$ANALYSIS_OUTPUT" | base64)
+          
+          # Store the encoded output in the environment
+          echo "ENCODED_OUTPUT=$ENCODED_OUTPUT" >> $GITHUB_ENV
   
       - name: Post or Update Code Analysis Comment
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ENCODED_OUTPUT: ${{ env.ENCODED_OUTPUT }}
         run: |
           COMMENT_IDENTIFIER="<!-- code-analysis-comment -->"
-
-          # Retrieve and escape the analysis output safely
-          COMMENT_RESULTS="${{ steps.code_analysis.outputs.ANALYSIS_OUTPUT }}"
-          ESCAPED_COMMENT_RESULTS=$(printf "%s" "$COMMENT_RESULTS" | sed 's/"/\\"/g; s/$/\\n/')
-
-          COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$ESCAPED_COMMENT_RESULTS"
-
+          
+          # Decode the Base64 output
+          COMMENT_RESULTS=$(echo "$ENCODED_OUTPUT" | base64 --decode)
+          
+          COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$COMMENT_RESULTS"
+      
           # Find and delete previous comments
           previous_comment_ids=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
             | jq -r ".[] | select(.body | contains(\"$COMMENT_IDENTIFIER\")) | .id")
-
+      
           for comment_id in $previous_comment_ids; do
             gh api repos/${{ github.repository }}/issues/comments/$comment_id -X DELETE
           done
-
-          # Post the new, cleaned-up comment
+      
+          # Post the new comment with the analysis output
           gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
             -f body="$COMMENT_CONTENT"
