@@ -1,12 +1,11 @@
-name: AI Code Analysis on Comment Trigger
+name: AI Code Analysis on PR Events
 
 on:
-  issue_comment:
-    types: [created]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 jobs:
-  analyze_code_on_comment:
-    if: contains(github.event.comment.body, '!ai-review')
+  analyze_code:
     runs-on: ubuntu-latest
 
     steps:
@@ -83,7 +82,7 @@ jobs:
           COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$(cat .github/actions/live_test_log.json)"
 
           # Find any previous AI review comment and delete it to keep the latest result at the top
-          previous_comment_ids=$(gh api repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
+          previous_comment_ids=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
             | jq -r ".[] | select(.body | contains(\"$COMMENT_IDENTIFIER\")) | .id")
 
           for comment_id in $previous_comment_ids; do
@@ -91,5 +90,5 @@ jobs:
           done
 
           # Post the new analysis comment
-          gh api repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
+          gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
             -f body="$COMMENT_CONTENT"
