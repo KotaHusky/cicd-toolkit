@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const crypto = require('crypto');
-const minimatch = require('minimatch');
+const { minimatch } = require('minimatch');
 
 // Environment variables for configurations
 const approvedTypes = process.env.APPROVED_TYPES.split(',');
