@@ -11,10 +11,6 @@ on:
         description: 'Comma-separated list of files or directories to exclude'
         required: false
         type: string
-      openai_api_key:
-        description: 'OpenAI API key for ChatGPT access'
-        required: true
-        type: string
 
 jobs:
   analyze_code:
@@ -61,6 +57,6 @@ jobs:
 
       - name: Run Code Analysis with Configured Inputs
         env:
-          OPENAI_API_KEY: ${{ inputs.openai_api_key }}  # Uses the API key provided by the consumer
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # Directly access the inherited API key
         run: |
           node .github/actions/code_analysis_with_gitignore_exclude.js

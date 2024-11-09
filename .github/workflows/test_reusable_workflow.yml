@@ -12,4 +12,4 @@ jobs:
     with:
       directory: '.github/actions'           # Optional: Override directory for testing
       exclude: 'docs/**,*.md'                # Optional: Exclude documentation files
-      openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+    secrets: inherit                         # Inherit all secrets, including OPENAI_API_KEY
