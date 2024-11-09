@@ -28,13 +28,18 @@ jobs:
       - name: Install Dependencies
         run: npm install axios js-yaml minimatch
 
+      - name: Install yq
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/download/v4.6.3/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+
       - name: Load Config and Set Environment Variables
-        run: node .github/actions/load_config.js >> $GITHUB_ENV
+        run: .github/actions/load_config.sh
         env:
           INPUT_DIRECTORY: ${{ inputs.directory }}
           INPUT_EXCLUDE: ${{ inputs.exclude }}
 
       - name: Run Code Analysis with Configured Inputs
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # Directly access the inherited API key
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # Access inherited API key
         run: node .github/actions/code_analysis_with_gitignore_exclude.js
