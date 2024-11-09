@@ -115,8 +115,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           COMMENT_IDENTIFIER="<!-- code-analysis-comment -->"
-          
-          # Retrieve the analysis output
+
+          # Retrieve the analysis output safely using printf
           COMMENT_RESULTS="${{ steps.code_analysis.outputs.ANALYSIS_OUTPUT }}"
 
           COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$COMMENT_RESULTS"
@@ -129,6 +129,6 @@ jobs:
             gh api repos/${{ github.repository }}/issues/comments/$comment_id -X DELETE
           done
 
-          # Post the new, cleaned-up comment
-          gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
-            -f body="$COMMENT_CONTENT"
+          # Post the new, cleaned-up comment using printf
+          printf "%s" "$COMMENT_CONTENT" | gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments -f body=-
+  
