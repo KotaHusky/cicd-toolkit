@@ -14,7 +14,9 @@ if (fs.existsSync(CONFIG_FILE)) {
 }
 
 // Parse environment variables to override config values
-const maxSizeBytes = process.env.MAX_SIZE_MB ? parseInt(process.env.MAX_SIZE_MB, 10) : config.max_size_mb;
+const maxSizeBytes = process.env.MAX_SIZE_MB 
+  ? parseInt(process.env.MAX_SIZE_MB, 10) * 1024 * 1024  // Convert MB to bytes
+  : config.max_size_mb * 1024 * 1024;  // Use config value if no env variable is set
 const approvedTypes = process.env.APPROVED_TYPES ? process.env.APPROVED_TYPES.split(' ') : config.approved_types;
 const maxCallsPerHour = process.env.MAX_CALLS_PER_HOUR ? parseInt(process.env.MAX_CALLS_PER_HOUR, 10) : config.max_calls_per_hour;
 const directory = process.env.DIRECTORY || config.directory;

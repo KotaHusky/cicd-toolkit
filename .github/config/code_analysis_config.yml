@@ -1,4 +1,4 @@
-max_size_mb: 1                        # Maximum combined size of files to analyze, in MB
+max_size_mb: 2                        # Maximum combined size of files to analyze, in MB
 approved_types:
   - '.js'
   - '.py'                             # Approved file types for analysis
