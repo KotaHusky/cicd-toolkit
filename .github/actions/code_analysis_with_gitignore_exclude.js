@@ -6,6 +6,8 @@ const { minimatch } = require('minimatch');
 
 // Environment variables for configurations
 const approvedTypes = process.env.APPROVED_TYPES.split(',').map(ext => ext.trim().toLowerCase());
+console.log("Parsed approved types:", approvedTypes);  // Debugging approved types
+
 const maxSizeBytes = parseInt(process.env.MAX_SIZE_MB, 10) * 1024 * 1024;
 const maxCallsPerHour = parseInt(process.env.MAX_CALLS_PER_HOUR, 10) || 3;
 const directory = process.env.DIRECTORY;
@@ -100,10 +102,11 @@ function loadApprovedFiles() {
     const isApprovedType = approvedTypes.includes(fileExtension);
     const isNotExcluded = !isExcluded(filePath);
 
+    // Additional logging to understand the decision-making process
     console.log(`File: ${file}`);
     console.log(` - Extension: ${fileExtension}`);
-    console.log(` - Approved Type: ${isApprovedType}`);
-    console.log(` - Excluded: ${!isNotExcluded}`);
+    console.log(` - Is approved type: ${isApprovedType}`);
+    console.log(` - Is not excluded: ${isNotExcluded}`);
 
     return isApprovedType && isNotExcluded;
   });
