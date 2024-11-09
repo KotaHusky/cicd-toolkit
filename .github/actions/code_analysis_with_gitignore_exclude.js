@@ -3,24 +3,47 @@ const path = require('path');
 const axios = require('axios');
 const crypto = require('crypto');
 const { minimatch } = require('minimatch');
+const yaml = require('js-yaml');
+
+// Load configuration file
+const CONFIG_FILE = '.github/config/code_analysis_config.yml';
+if (!fs.existsSync(CONFIG_FILE)) {
+  console.error(`Error: Configuration file not found at ${CONFIG_FILE}`);
+  process.exit(1); // Exit if config file doesn't exist
+}
+
+const config = yaml.load(fs.readFileSync(CONFIG_FILE, 'utf8'));
 
 // Parse and normalize approved types with leading dots and lowercase
-let approvedTypes = process.env.APPROVED_TYPES.split(',').map(ext => ext.trim().toLowerCase());
+let approvedTypes = config.approved_types ? config.approved_types.split(',').map(ext => ext.trim().toLowerCase()) : [];
 
-// Additional safeguard to handle single string edge case
 if (approvedTypes.length === 1 && approvedTypes[0].includes(' ')) {
   approvedTypes = approvedTypes[0].split(' ').map(ext => ext.trim().toLowerCase());
 }
 
+if (approvedTypes.length === 0) {
+  console.error('Error: No approved types defined in the configuration file.');
+  process.exit(1); // Exit if no approved types are defined
+}
+
 console.log("Parsed approved types:", approvedTypes);  // Debugging approved types
 
-const maxSizeBytes = parseInt(process.env.MAX_SIZE_MB, 10) * 1024 * 1024;
-const maxCallsPerHour = parseInt(process.env.MAX_CALLS_PER_HOUR, 10) || 3;
-const directory = process.env.DIRECTORY;
-const excludePatterns = process.env.EXCLUDE ? process.env.EXCLUDE.split(',') : [];
+const maxSizeBytes = parseInt(config.max_size_mb, 10) * 1024 * 1024;
+const maxCallsPerHour = parseInt(config.max_calls_per_hour, 10) || 3;
+
+// Ensure the DIRECTORY is set in the config file, fail if not
+const directory = config.directory;
+if (!directory) {
+  console.error('Error: directory is not defined in the configuration file.');
+  process.exit(1); // Exit if directory is not defined
+}
+
+const excludePatterns = config.exclude ? config.exclude.split(',') : [];
 const openaiApiKey = process.env.OPENAI_API_KEY;
 const callCountFile = path.join('.github/actions/hourly_call_count.json');
 const oneHour = 60 * 60 * 1000;
+
+console.log(`Using directory: ${directory}`);  // Debugging directory
 
 /**
  * Generates a unique hash for each API call.
@@ -95,7 +118,7 @@ function isExcluded(filePath) {
 function loadApprovedFiles() {
   if (!fs.existsSync(directory)) {
     console.error(`Error: Specified directory "${directory}" does not exist.`);
-    process.exit(1);
+    process.exit(1);  // Exit if the directory does not exist
   }
 
   let combinedText = '';
