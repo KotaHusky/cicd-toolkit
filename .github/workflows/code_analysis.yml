@@ -106,7 +106,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           COMMENT_IDENTIFIER="<!-- code-analysis-comment -->"
-          COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$(cat .github/actions/live_test_log.json)"
+          COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$(node .github/actions/code_analysis_with_gitignore_exclude.js)"
 
           # Find any previous AI review comment and delete it to keep the latest result at the top
           previous_comment_ids=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
