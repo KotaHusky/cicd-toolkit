@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { minimatch } = require('minimatch');
 
 // Environment variables for configurations
-const approvedTypes = process.env.APPROVED_TYPES.split(',');
+const approvedTypes = process.env.APPROVED_TYPES.split(',').map(ext => ext.trim().toLowerCase());
 const maxSizeBytes = parseInt(process.env.MAX_SIZE_MB, 10) * 1024 * 1024;
 const maxCallsPerHour = parseInt(process.env.MAX_CALLS_PER_HOUR, 10) || 3;
 const directory = process.env.DIRECTORY;
@@ -96,7 +96,7 @@ function loadApprovedFiles() {
   console.log(`Reading files in directory: ${directory}`);
   const files = fs.readdirSync(directory).filter(file => {
     const filePath = path.join(directory, file);
-    const fileExtension = path.extname(file);
+    const fileExtension = path.extname(file).toLowerCase();  // Normalize to lowercase
     const isApprovedType = approvedTypes.includes(fileExtension);
     const isNotExcluded = !isExcluded(filePath);
 
