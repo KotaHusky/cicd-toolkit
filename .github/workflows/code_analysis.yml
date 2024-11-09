@@ -29,34 +29,9 @@ jobs:
         run: npm install axios js-yaml minimatch
 
       - name: Load Config and Set Environment Variables
-        id: load_config
-        run: |
-          const fs = require('fs');
-          const yaml = require('js-yaml');
-          
-          // Load central configuration file
-          const config = yaml.load(fs.readFileSync('.github/config/code_analysis_config.yml', 'utf8'));
-
-          // Set environment variables from config, with optional overrides for directory and exclude
-          echo "MAX_SIZE_MB=${config.max_size_mb}" >> $GITHUB_ENV
-          echo "APPROVED_TYPES=${config.approved_types.join(',')}" >> $GITHUB_ENV
-          echo "MAX_CALLS_PER_HOUR=${config.max_calls_per_hour}" >> $GITHUB_ENV
-
-          # Use inputs if provided; otherwise, fall back to config values
-          if [ "${{ inputs.directory }}" ]; then
-            echo "DIRECTORY=${{ inputs.directory }}" >> $GITHUB_ENV
-          else
-            echo "DIRECTORY=${config.directory}" >> $GITHUB_ENV
-          fi
-
-          if [ "${{ inputs.exclude }}" ]; then
-            echo "EXCLUDE=${{ inputs.exclude }}" >> $GITHUB_ENV
-          else
-            echo "EXCLUDE=${config.exclude}" >> $GITHUB_ENV
-          fi
+        run: node .github/actions/load_config.js >> $GITHUB_ENV
 
       - name: Run Code Analysis with Configured Inputs
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # Directly access the inherited API key
-        run: |
-          node .github/actions/code_analysis_with_gitignore_exclude.js
+        run: node .github/actions/code_analysis_with_gitignore_exclude.js
