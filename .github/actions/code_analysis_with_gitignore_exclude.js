@@ -4,8 +4,14 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { minimatch } = require('minimatch');
 
-// Environment variables for configurations
-const approvedTypes = process.env.APPROVED_TYPES.split(',').map(ext => ext.trim().toLowerCase());
+// Parse and normalize approved types with leading dots and lowercase
+let approvedTypes = process.env.APPROVED_TYPES.split(',').map(ext => ext.trim().toLowerCase());
+
+// Additional safeguard to handle single string edge case
+if (approvedTypes.length === 1 && approvedTypes[0].includes(' ')) {
+  approvedTypes = approvedTypes[0].split(' ').map(ext => ext.trim().toLowerCase());
+}
+
 console.log("Parsed approved types:", approvedTypes);  // Debugging approved types
 
 const maxSizeBytes = parseInt(process.env.MAX_SIZE_MB, 10) * 1024 * 1024;
