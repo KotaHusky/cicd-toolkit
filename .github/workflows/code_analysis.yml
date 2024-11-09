@@ -108,7 +108,7 @@ jobs:
           ENCODED_OUTPUT=$(echo "$ANALYSIS_OUTPUT" | base64)
           
           # Store the encoded output in the environment
-          echo "ENCODED_OUTPUT=$ENCODED_OUTPUT" >> $GITHUB_ENV
+          echo "ENCODED_OUTPUT=$ENCODED_OUTPUT" >> $GITHUB_OUTPUT
   
       - name: Post or Update Code Analysis Comment
         env:
@@ -118,7 +118,7 @@ jobs:
           COMMENT_IDENTIFIER="<!-- code-analysis-comment -->"
           
           # Decode the Base64 output
-          COMMENT_RESULTS=$(echo "$ENCODED_OUTPUT" | base64 --decode)
+          COMMENT_RESULTS=$(echo "${{ steps.code_analysis.outputs.ENCODED_OUTPUT }}" | base64 --decode)
           
           COMMENT_CONTENT="$COMMENT_IDENTIFIER\n### AI Code Analysis Results\n\n$COMMENT_RESULTS"
       
