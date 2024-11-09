@@ -3,9 +3,17 @@ name: Reusable Code Analysis with ChatGPT
 on:
   workflow_call:
     inputs:
-      exclude:
-        description: 'Comma-separated list of files or directories to exclude, in .gitignore style'
+      directory:
+        description: 'Directory to scan for code analysis'
         required: false
+        type: string
+      exclude:
+        description: 'Comma-separated list of files or directories to exclude'
+        required: false
+        type: string
+      openai_api_key:
+        description: 'OpenAI API key for ChatGPT access'
+        required: true
         type: string
 
 jobs:
@@ -24,7 +32,7 @@ jobs:
       - name: Install Dependencies
         run: npm install axios js-yaml minimatch
 
-      - name: Load Central Config and Set Environment Variables
+      - name: Load Config and Set Environment Variables
         id: load_config
         run: |
           const fs = require('fs');
@@ -33,15 +41,26 @@ jobs:
           // Load central configuration file
           const config = yaml.load(fs.readFileSync('.github/config/code_analysis_config.yml', 'utf8'));
 
-          // Set environment variables from config
-          console.log(`::set-env name=MAX_SIZE_MB::${config.max_size_mb}`);
-          console.log(`::set-env name=APPROVED_TYPES::${config.approved_types.join(',')}`);
-          console.log(`::set-env name=MAX_CALLS_PER_HOUR::${config.max_calls_per_hour}`);
-          console.log(`::set-env name=DIRECTORY::${config.directory}`);
+          // Set environment variables from config, with optional overrides for directory and exclude
+          echo "MAX_SIZE_MB=${config.max_size_mb}" >> $GITHUB_ENV
+          echo "APPROVED_TYPES=${config.approved_types.join(',')}" >> $GITHUB_ENV
+          echo "MAX_CALLS_PER_HOUR=${config.max_calls_per_hour}" >> $GITHUB_ENV
 
-      - name: Run Code Analysis Script with Rate Limiting and Exclusions
+          # Use inputs if provided; otherwise, fall back to config values
+          if [ "${{ inputs.directory }}" ]; then
+            echo "DIRECTORY=${{ inputs.directory }}" >> $GITHUB_ENV
+          else
+            echo "DIRECTORY=${config.directory}" >> $GITHUB_ENV
+          fi
+
+          if [ "${{ inputs.exclude }}" ]; then
+            echo "EXCLUDE=${{ inputs.exclude }}" >> $GITHUB_ENV
+          else
+            echo "EXCLUDE=${config.exclude}" >> $GITHUB_ENV
+          fi
+
+      - name: Run Code Analysis with Configured Inputs
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          EXCLUDE: ${{ inputs.exclude }}
+          OPENAI_API_KEY: ${{ inputs.openai_api_key }}  # Uses the API key provided by the consumer
         run: |
           node .github/actions/code_analysis_with_gitignore_exclude.js
