@@ -1,5 +1,9 @@
 max_size_mb: 1                        # Maximum combined size of files to analyze, in MB
-approved_types: ['.js', '.py']        # Approved file types for analysis
+approved_types:
+  - '.js'
+  - '.py'                             # Approved file types for analysis
 directory: 'src'                      # Default directory for analysis
-exclude: 'tests/**,*.test.js'         # Default exclude patterns for testing
+exclude:
+  - 'tests/**'
+  - '*.test.js'                       # Default exclude patterns for testing
 max_calls_per_hour: 3                 # Maximum ChatGPT API calls per hour
