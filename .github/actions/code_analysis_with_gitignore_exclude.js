@@ -4,9 +4,10 @@ const axios = require('axios');
 const crypto = require('crypto');
 const minimatch = require('minimatch');
 
+// Environment variables for configurations
 const approvedTypes = process.env.APPROVED_TYPES.split(',');
-const maxSizeBytes = parseInt(process.env.MAX_SIZE_MB) * 1024 * 1024;
-const maxCallsPerHour = parseInt(process.env.MAX_CALLS_PER_HOUR) || 3;
+const maxSizeBytes = parseInt(process.env.MAX_SIZE_MB, 10) * 1024 * 1024;
+const maxCallsPerHour = parseInt(process.env.MAX_CALLS_PER_HOUR, 10) || 3;
 const directory = process.env.DIRECTORY;
 const excludePatterns = process.env.EXCLUDE ? process.env.EXCLUDE.split(',') : [];
 const openaiApiKey = process.env.OPENAI_API_KEY;
@@ -15,7 +16,6 @@ const oneHour = 60 * 60 * 1000;
 
 /**
  * Generates a unique hash for each API call.
- *
  * @returns {string} A unique 12-character hash.
  */
 function generateUniqueHash() {
@@ -24,7 +24,6 @@ function generateUniqueHash() {
 
 /**
  * Retrieves the current call count, filtering out entries older than one hour.
- *
  * @returns {{count: number, calls: Array<{hash: string, timestamp: number}>}}
  * The current count and an array of recent call entries.
  */
@@ -68,7 +67,6 @@ function updateHourlyCallCount() {
 
 /**
  * Checks if a file path matches any of the exclude patterns.
- *
  * @param {string} filePath - The path of the file to check.
  * @returns {boolean} True if the file should be excluded, false otherwise.
  */
@@ -78,7 +76,6 @@ function isExcluded(filePath) {
 
 /**
  * Loads files from the specified directory, applying filters for approved types and exclusions.
- *
  * @returns {{combinedText: string, totalSize: number}} The combined content of approved files and the total size.
  */
 function loadApprovedFiles() {
@@ -115,7 +112,6 @@ function loadApprovedFiles() {
 
 /**
  * Sends code content to the ChatGPT API for analysis and logs the API response.
- *
  * @param {string} inputText - The code content to analyze.
  * @returns {Promise<string>} The response from the ChatGPT API.
  */
@@ -132,6 +128,11 @@ async function getAIFindings(inputText) {
     { headers: { Authorization: `Bearer ${openaiApiKey}` } }
   );
 
+  // Log response to a file for review (only for testing purposes)
+  const logFile = '.github/actions/live_test_log.json';
+  const logData = { timestamp: Date.now(), response: response.data };
+  fs.appendFileSync(logFile, JSON.stringify(logData, null, 2) + ',\n');
+
   return response.data.choices[0].message.content;
 }
 
@@ -146,4 +147,21 @@ async function main() {
     return;
   }
 
-  const { combinedText, totalSize 
+  const { combinedText, totalSize } = loadApprovedFiles();
+
+  if (totalSize > maxSizeBytes) {
+    console.log(`Info: Total file size (${totalSize} bytes) exceeds limit of ${maxSizeBytes} bytes. Skipping analysis.`);
+  } else if (!combinedText.trim()) {
+    console.log('Info: No approved file types found. Skipping analysis.');
+  } else {
+    try {
+      const findings = await getAIFindings(combinedText);
+      console.log('AI Findings:', findings);
+      updateHourlyCallCount();
+    } catch (error) {
+      console.error('Error during ChatGPT analysis:', error);
+    }
+  }
+}
+
+main().catch(console.error);
