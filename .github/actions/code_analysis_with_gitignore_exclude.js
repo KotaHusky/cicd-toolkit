@@ -147,6 +147,13 @@ async function getAIFindings(inputText) {
 async function main() {
   const { count } = getHourlyCallCount();
 
+  // Show all configurations
+  console.log('Approved types:', approvedTypes);
+  console.log('Max size (bytes):', maxSizeBytes);
+  console.log('Max calls per hour:', maxCallsPerHour);
+  console.log('Directory:', directory);
+  console.log('Exclude patterns:', excludePatterns);  
+
   if (count >= maxCallsPerHour) {
     console.log(`Info: Maximum ChatGPT call limit of ${maxCallsPerHour} per hour reached. Skipping analysis.`);
     return;
