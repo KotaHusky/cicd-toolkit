@@ -29,14 +29,17 @@ function generateUniqueHash() {
  */
 function getHourlyCallCount() {
   if (!fs.existsSync(callCountFile)) {
+    console.log('No previous call count file found. Initializing new count.');
     return { count: 0, calls: [] };
   }
 
   const data = JSON.parse(fs.readFileSync(callCountFile, 'utf8'));
   const currentTime = Date.now();
+  console.log(`Current time: ${currentTime}, Previous calls:`, data.calls);
 
   // Filter to keep only calls within the last hour
   const recentCalls = data.calls.filter(call => currentTime - call.timestamp < oneHour);
+  console.log(`Filtered recent calls within the last hour: ${recentCalls.length}`);
 
   return {
     count: recentCalls.length,
@@ -62,6 +65,7 @@ function updateHourlyCallCount() {
   currentData.count = recentCalls.length;
   currentData.calls = recentCalls;
 
+  console.log('Updated call count:', currentData);
   fs.writeFileSync(callCountFile, JSON.stringify(currentData, null, 2));
 }
 
@@ -71,7 +75,9 @@ function updateHourlyCallCount() {
  * @returns {boolean} True if the file should be excluded, false otherwise.
  */
 function isExcluded(filePath) {
-  return excludePatterns.some(pattern => minimatch(filePath, pattern.trim()));
+  const result = excludePatterns.some(pattern => minimatch(filePath, pattern.trim()));
+  console.log(`Checking if file "${filePath}" should be excluded: ${result}`);
+  return result;
 }
 
 /**
@@ -87,14 +93,28 @@ function loadApprovedFiles() {
   let combinedText = '';
   let totalSize = 0;
 
+  console.log(`Reading files in directory: ${directory}`);
   const files = fs.readdirSync(directory).filter(file => {
     const filePath = path.join(directory, file);
-    return approvedTypes.includes(path.extname(file)) && !isExcluded(filePath);
+    const fileExtension = path.extname(file);
+    const isApprovedType = approvedTypes.includes(fileExtension);
+    const isNotExcluded = !isExcluded(filePath);
+
+    console.log(`File: ${file}`);
+    console.log(` - Extension: ${fileExtension}`);
+    console.log(` - Approved Type: ${isApprovedType}`);
+    console.log(` - Excluded: ${!isNotExcluded}`);
+
+    return isApprovedType && isNotExcluded;
   });
+
+  console.log(`Files to process: ${files}`);
 
   for (const file of files) {
     const filePath = path.join(directory, file);
     const fileSize = fs.statSync(filePath).size;
+
+    console.log(`Processing file: ${filePath} (size: ${fileSize} bytes)`);
 
     if (totalSize + fileSize > maxSizeBytes) {
       console.log(`Skipping file ${filePath} (size exceeds limit)`);
@@ -105,13 +125,15 @@ function loadApprovedFiles() {
     combinedText += `\n### File: ${filePath} ###\n\n${fileContent}\n`;
     totalSize += fileSize;
 
+    console.log(`Total accumulated size: ${totalSize} bytes`);
+
     if (totalSize >= maxSizeBytes) {
       console.log(`Total size limit reached at ${totalSize} bytes.`);
       break;
     }
   }
 
-  console.log(`Total content size: ${totalSize} bytes`);
+  console.log(`Final content size: ${totalSize} bytes`);
   return { combinedText, totalSize };
 }
 
@@ -146,13 +168,6 @@ async function getAIFindings(inputText) {
  */
 async function main() {
   const { count } = getHourlyCallCount();
-
-  // Show all configurations
-  console.log('Approved types:', approvedTypes);
-  console.log('Max size (bytes):', maxSizeBytes);
-  console.log('Max calls per hour:', maxCallsPerHour);
-  console.log('Directory:', directory);
-  console.log('Exclude patterns:', excludePatterns);  
 
   if (count >= maxCallsPerHour) {
     console.log(`Info: Maximum ChatGPT call limit of ${maxCallsPerHour} per hour reached. Skipping analysis.`);
