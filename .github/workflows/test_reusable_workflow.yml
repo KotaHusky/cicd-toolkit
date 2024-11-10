@@ -1,0 +1,15 @@
+name: Test Reusable Code Analysis Workflow
+
+on:
+  pull_request:
+    branches:
+      - '**'                 # Trigger on pull requests to any branch
+  workflow_dispatch:         # Allow manual triggering for testing
+
+jobs:
+  test_code_analysis:
+    uses: ./.github/workflows/code_analysis.yml
+    with:
+      directory: '.github/actions'           # Optional: Override directory for testing
+      exclude: 'docs/**,*.md'                # Optional: Exclude documentation files
+    secrets: inherit                         # Inherit all secrets, including OPENAI_API_KEY
