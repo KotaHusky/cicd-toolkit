@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =============================================================================
+# Azure Container Apps Setup Wizard
+# =============================================================================
+#
+# One-time interactive setup for deploying a container app to Azure Container
+# Apps with GitHub Actions CI/CD. Project-agnostic — works for any app.
+#
+# Prerequisites:
+#   - az CLI installed and logged in (az login)
+#   - gh CLI installed and logged in (gh auth login)
+# =============================================================================
+
+echo ""
+echo "=== Azure Container Apps Setup Wizard ==="
+echo ""
+echo "This script will:"
+echo "  1. Create an Azure resource group"
+echo "  2. Create a Container Apps environment"
+echo "  3. Create a Container App from your GHCR image"
+echo "  4. Create a service principal for GitHub Actions"
+echo "  5. Output the secrets to configure in GitHub"
+echo ""
+echo "Prerequisites: az CLI logged in, gh CLI logged in"
+echo ""
+
+# ---- Preflight checks -------------------------------------------------------
+
+if ! command -v az &> /dev/null; then
+  echo "Error: az CLI not found. Install it: https://aka.ms/install-azure-cli"
+  exit 1
+fi
+
+if ! command -v gh &> /dev/null; then
+  echo "Error: gh CLI not found. Install it: https://cli.github.com"
+  exit 1
+fi
+
+if ! az account show &> /dev/null; then
+  echo "Error: Not logged in to Azure. Run: az login"
+  exit 1
+fi
+
+if ! gh auth status &> /dev/null; then
+  echo "Error: Not logged in to GitHub CLI. Run: gh auth login"
+  exit 1
+fi
+
+# ---- Derive defaults from environment ---------------------------------------
+
+DEFAULT_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo "")
+DEFAULT_REPO_NAME=$(echo "$DEFAULT_REPO" | cut -d'/' -f2)
+DEFAULT_OWNER=$(echo "$DEFAULT_REPO" | cut -d'/' -f1)
+DEFAULT_IMAGE="ghcr.io/${DEFAULT_REPO}:latest"
+
+# ---- Prompts -----------------------------------------------------------------
+
+prompt() {
+  local var_name=$1
+  local prompt_text=$2
+  local default=$3
+  local value
+
+  if [[ -n "$default" ]]; then
+    read -rp "${prompt_text} [${default}]: " value
+    value="${value:-$default}"
+  else
+    read -rp "${prompt_text}: " value
+    while [[ -z "$value" ]]; do
+      echo "  This field is required."
+      read -rp "${prompt_text}: " value
+    done
+  fi
+
+  eval "$var_name=\"$value\""
+}
+
+prompt APP_NAME       "App name"                    "${DEFAULT_REPO_NAME}"
+prompt RESOURCE_GROUP "Resource group name"         "rg-${APP_NAME}"
+prompt LOCATION       "Azure region"                "westus2"
+prompt IMAGE          "GHCR image"                  "${DEFAULT_IMAGE}"
+prompt TARGET_PORT    "Target port"                 "3000"
+prompt MIN_REPLICAS   "Min replicas"                "1"
+prompt GITHUB_REPO    "GitHub repo for secrets"     "${DEFAULT_REPO}"
+
+ENV_NAME="${APP_NAME}-env"
+
+echo ""
+echo "=== Configuration Summary ==="
+echo "  App name:        ${APP_NAME}"
+echo "  Resource group:  ${RESOURCE_GROUP}"
+echo "  Region:          ${LOCATION}"
+echo "  Image:           ${IMAGE}"
+echo "  Target port:     ${TARGET_PORT}"
+echo "  Min replicas:    ${MIN_REPLICAS}"
+echo "  Environment:     ${ENV_NAME}"
+echo "  GitHub repo:     ${GITHUB_REPO}"
+echo ""
+
+read -rp "Proceed? (y/N): " confirm
+if [[ "${confirm}" != "y" && "${confirm}" != "Y" ]]; then
+  echo "Aborted."
+  exit 0
+fi
+
+echo ""
+
+# ---- 1. Resource Group -------------------------------------------------------
+
+echo "--- Creating resource group: ${RESOURCE_GROUP} ---"
+az group create \
+  --name "$RESOURCE_GROUP" \
+  --location "$LOCATION" \
+  --output table
+
+# ---- 2. Container Apps Environment -------------------------------------------
+
+echo ""
+echo "--- Creating Container Apps environment: ${ENV_NAME} ---"
+az containerapp env create \
+  --name "$ENV_NAME" \
+  --resource-group "$RESOURCE_GROUP" \
+  --location "$LOCATION" \
+  --output table
+
+# ---- 3. Container App --------------------------------------------------------
+
+echo ""
+echo "--- Creating Container App: ${APP_NAME} ---"
+az containerapp create \
+  --name "$APP_NAME" \
+  --resource-group "$RESOURCE_GROUP" \
+  --environment "$ENV_NAME" \
+  --image "$IMAGE" \
+  --target-port "$TARGET_PORT" \
+  --ingress external \
+  --min-replicas "$MIN_REPLICAS" \
+  --output table
+
+# ---- 4. Service Principal for GitHub Actions ---------------------------------
+
+echo ""
+echo "--- Creating service principal for GitHub Actions ---"
+
+SUB_ID=$(az account show --query id -o tsv)
+RG_ID="/subscriptions/${SUB_ID}/resourceGroups/${RESOURCE_GROUP}"
+
+SP_JSON=$(az ad sp create-for-rbac \
+  --name "github-actions-${APP_NAME}" \
+  --role contributor \
+  --scopes "$RG_ID" \
+  --sdk-auth)
+
+echo ""
+echo "Service principal created."
+
+# ---- 5. Show FQDN -----------------------------------------------------------
+
+FQDN=$(az containerapp show \
+  --name "$APP_NAME" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query "properties.configuration.ingress.fqdn" \
+  -o tsv)
+
+echo ""
+echo "=== Your app is live at ==="
+echo "  https://${FQDN}"
+echo ""
+
+# ---- 6. Set GitHub Secret ----------------------------------------------------
+
+read -rp "Set AZURE_CREDENTIALS secret in ${GITHUB_REPO}? (y/N): " set_secret
+if [[ "${set_secret}" == "y" || "${set_secret}" == "Y" ]]; then
+  echo "$SP_JSON" | gh secret set AZURE_CREDENTIALS --repo "$GITHUB_REPO"
+  echo "Secret AZURE_CREDENTIALS set in ${GITHUB_REPO}."
+else
+  echo ""
+  echo "=== AZURE_CREDENTIALS value (set this as a GitHub secret) ==="
+  echo "$SP_JSON"
+fi
+
+# ---- Cloudflare DNS instructions --------------------------------------------
+
+echo ""
+echo "=== Cloudflare DNS Setup ==="
+echo ""
+echo "Your app is live at: ${FQDN}"
+echo ""
+echo "To use a custom domain with Cloudflare:"
+echo "  1. Add a CNAME record pointing to: ${FQDN}"
+echo "  2. Set proxy status: Proxied (orange cloud)"
+echo "  3. Generate an Origin Certificate (SSL/TLS > Origin Server)"
+echo "  4. Upload it to ACA:"
+echo "     az containerapp env certificate upload \\"
+echo "       --name ${ENV_NAME} \\"
+echo "       --resource-group ${RESOURCE_GROUP} \\"
+echo "       --certificate-file <path-to-cert.pem> \\"
+echo "       --private-key-file <path-to-key.pem>"
+echo "     az containerapp hostname bind \\"
+echo "       --name ${APP_NAME} \\"
+echo "       --resource-group ${RESOURCE_GROUP} \\"
+echo "       --hostname <your-domain> \\"
+echo "       --certificate <cert-name>"
+echo "  5. Set SSL mode to Full (Strict) in Cloudflare dashboard"
+echo ""
+echo "=== Setup Complete ==="
