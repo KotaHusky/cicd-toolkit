@@ -10,6 +10,10 @@ on:
     branches: [main]
 
 jobs:
+  # Lint commit messages on PRs (requires @commitlint/cli in package.json)
+  commitlint:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/commitlint.yml@main
+
   verify:
     uses: KotaHusky/cicd-toolkit/.github/workflows/build-verify.yml@main
     with:
@@ -27,6 +31,7 @@ jobs:
       packages: write
     with:
       platforms: 'linux/amd64'
+      # version: '1.2.3'  # add semver tags (v1.2.3, v1.2, v1)
       # dockerfile: './Dockerfile'
       # context: '.'
       # push: true

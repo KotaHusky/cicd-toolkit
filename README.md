@@ -1,6 +1,7 @@
 # cicd-toolkit
 
 [![Build Verify](https://img.shields.io/badge/workflow-build--verify-blue?logo=githubactions&logoColor=white)](#build-verification)
+[![Commitlint](https://img.shields.io/badge/workflow-commitlint-blue?logo=conventionalcommits&logoColor=white)](#commitlint)
 [![Docker GHCR](https://img.shields.io/badge/workflow-docker--ghcr-blue?logo=docker&logoColor=white)](#docker-build--push-to-ghcr)
 [![CDK Deploy](https://img.shields.io/badge/workflow-cdk--deploy-blue?logo=amazonaws&logoColor=white)](#cdk-deploy)
 [![AI Release](https://img.shields.io/badge/workflow-release-blue?logo=anthropic&logoColor=white)](#ai-powered-release)
@@ -29,6 +30,22 @@ jobs:
 | `run-tests` | boolean | `true` | Run the test step |
 | `run-lint` | boolean | `true` | Run the lint step |
 | `package-manager` | string | `npm` | Package manager (`npm` or `pnpm`) |
+
+### Commitlint
+
+**`commitlint.yml`** — Lint PR commit messages against [Conventional Commits](https://www.conventionalcommits.org/).
+
+```yaml
+jobs:
+  commitlint:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/commitlint.yml@main
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `node-version` | string | `24` | Node.js version |
+
+> **Requirement:** Consumer repo must have `@commitlint/cli` and a commitlint config (e.g. `@commitlint/config-conventional`) in `package.json`.
 
 ### Docker Build & Push to GHCR
 
@@ -146,7 +163,7 @@ This creates an IAM OIDC Provider for `token.actions.githubusercontent.com` and 
 
 See [`examples/`](examples/) for ready-to-copy workflow files:
 
-- [`ci.yml`](examples/ci.yml) — Build verification + Docker push
+- [`ci.yml`](examples/ci.yml) — Build verification + Docker push + commitlint
 - [`release.yml`](examples/release.yml) — AI-powered release on tag push
 
 ## License
