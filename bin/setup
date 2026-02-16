@@ -3,8 +3,12 @@ set -euo pipefail
 
 # ─── cicd-toolkit setup wizard ───────────────────────────────────────────────
 # Interactive setup for Azure Container Apps + Cloudflare DNS + GitHub secrets.
+# Uses Bicep for Azure infrastructure, gh CLI for secrets, Cloudflare API for DNS.
 # Prerequisites: az, gh (and optionally gum for a nicer UX).
 # Usage: ./bin/setup
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BICEP_FILE="${SCRIPT_DIR}/../infra/main.bicep"
 
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -88,16 +92,19 @@ check_prereqs() {
     info "Install 'gum' for a nicer experience: brew install gum"
   fi
 
+  # Check Bicep template exists
+  [[ -f "$BICEP_FILE" ]] || fail "Bicep template not found: $BICEP_FILE"
+
   # Check logins
   az account show &>/dev/null || fail "Not logged in to Azure. Run: az login"
   gh auth status &>/dev/null  || fail "Not logged in to GitHub. Run: gh auth login"
   success "Authenticated to Azure and GitHub"
 }
 
-# ─── Azure setup ─────────────────────────────────────────────────────────────
+# ─── Azure setup (Bicep) ────────────────────────────────────────────────────
 
 setup_azure() {
-  header "Azure Container Apps setup"
+  header "Azure Container Apps setup (Bicep)"
 
   # Subscription
   local sub_id sub_name
@@ -105,10 +112,6 @@ setup_azure() {
   sub_name=$(az account show --query name -o tsv)
   info "Using subscription: $sub_name ($sub_id)"
   confirm "Use this subscription?" || fail "Switch subscription with: az account set -s <id>"
-
-  # Tenant
-  local tenant_id
-  tenant_id=$(az account show --query tenantId -o tsv)
 
   # Resource group
   header "Resource group"
@@ -118,6 +121,7 @@ setup_azure() {
   if [[ "$rg_action" == "Create new" ]]; then
     rg_name=$(input "Resource group name" "rg-homepage")
     rg_location=$(input "Azure region" "eastus")
+    info "Creating resource group..."
     az group create --name "$rg_name" --location "$rg_location" -o none
     success "Created resource group: $rg_name"
   else
@@ -126,142 +130,83 @@ setup_azure() {
     success "Using resource group: $rg_name ($rg_location)"
   fi
 
-  # Container Apps environment
-  header "Container Apps environment"
+  # Collect parameters
+  header "Bicep deployment parameters"
   local env_name
-  local existing_envs
-  existing_envs=$(az containerapp env list --resource-group "$rg_name" --query "[].name" -o tsv 2>/dev/null || true)
-  if [[ -n "$existing_envs" ]]; then
-    local env_action
-    env_action=$(choose "Create new or use existing environment?" "Create new" "Use existing")
-    if [[ "$env_action" == "Use existing" ]]; then
-      env_name=$(echo "$existing_envs" | choose "Select environment:")
-    fi
-  fi
-  if [[ -z "${env_name:-}" ]]; then
-    env_name=$(input "Environment name" "aca-env")
-    az containerapp env create \
-      --name "$env_name" \
-      --resource-group "$rg_name" \
-      --location "$rg_location" \
-      -o none
-    success "Created Container Apps environment: $env_name"
-  else
-    success "Using environment: $env_name"
-  fi
+  env_name=$(input "Container Apps environment name" "aca-env")
+  local identity_name
+  identity_name=$(input "Managed identity name" "github-actions-oidc")
 
-  # App registration + OIDC federated credentials
-  header "Azure AD app registration (for GitHub OIDC)"
-  local app_name
-  app_name=$(input "App registration name" "github-actions-oidc")
-
-  local client_id
-  # Check if app already exists
-  client_id=$(az ad app list --display-name "$app_name" --query "[0].appId" -o tsv 2>/dev/null || true)
-  if [[ -n "$client_id" && "$client_id" != "None" ]]; then
-    success "App registration already exists: $app_name ($client_id)"
-  else
-    client_id=$(az ad app create --display-name "$app_name" --query appId -o tsv)
-    success "Created app registration: $app_name ($client_id)"
-  fi
-
-  # Service principal
-  local sp_exists
-  sp_exists=$(az ad sp list --filter "appId eq '$client_id'" --query "[0].id" -o tsv 2>/dev/null || true)
-  if [[ -z "$sp_exists" || "$sp_exists" == "None" ]]; then
-    az ad sp create --id "$client_id" -o none
-    success "Created service principal"
-  else
-    success "Service principal already exists"
-  fi
-
-  # Role assignment — Contributor on resource group
-  local sp_object_id
-  sp_object_id=$(az ad sp list --filter "appId eq '$client_id'" --query "[0].id" -o tsv)
-  local role_exists
-  role_exists=$(az role assignment list \
-    --assignee "$sp_object_id" \
-    --role "Contributor" \
-    --scope "/subscriptions/${sub_id}/resourceGroups/${rg_name}" \
-    --query "[0].id" -o tsv 2>/dev/null || true)
-  if [[ -z "$role_exists" ]]; then
-    az role assignment create \
-      --assignee-object-id "$sp_object_id" \
-      --assignee-principal-type ServicePrincipal \
-      --role "Contributor" \
-      --scope "/subscriptions/${sub_id}/resourceGroups/${rg_name}" \
-      -o none
-    success "Assigned Contributor role on $rg_name"
-  else
-    success "Contributor role already assigned"
-  fi
-
-  # Federated credentials for each repo
-  header "GitHub OIDC federated credentials"
-  info "Add federated credentials for each repo that will deploy."
+  # Collect GitHub repos
+  local repos=()
+  info "Add GitHub repos that will deploy to this environment."
   local add_more=true
   while $add_more; do
     local repo
     repo=$(input "GitHub repo (owner/name)" "")
-    if [[ -z "$repo" ]]; then break; fi
+    [[ -n "$repo" ]] && repos+=("$repo")
+    confirm "Add another repo?" && add_more=true || add_more=false
+  done
+  [[ ${#repos[@]} -gt 0 ]] || fail "At least one GitHub repo is required"
 
-    local cred_name
-    cred_name="gha-$(echo "$repo" | tr '/' '-')-main"
+  # Build JSON array for Bicep parameter
+  local repos_json
+  repos_json=$(printf '%s\n' "${repos[@]}" | jq -R . | jq -sc .)
 
-    local cred_exists
-    cred_exists=$(az ad app federated-credential list --id "$client_id" \
-      --query "[?name=='$cred_name'].id" -o tsv 2>/dev/null || true)
-    if [[ -n "$cred_exists" ]]; then
-      success "Federated credential already exists: $cred_name"
-    else
-      az ad app federated-credential create --id "$client_id" --parameters "{
-        \"name\": \"$cred_name\",
-        \"issuer\": \"https://token.actions.githubusercontent.com\",
-        \"subject\": \"repo:${repo}:ref:refs/heads/main\",
-        \"audiences\": [\"api://AzureADTokenExchange\"]
-      }" -o none
-      success "Created federated credential for $repo (main branch)"
-    fi
+  # Deploy Bicep
+  header "Deploying infrastructure via Bicep"
+  info "Template: $BICEP_FILE"
+  info "Resource group: $rg_name"
+  info "Repos: ${repos[*]}"
+  echo ""
 
-    # Also add credential for pull requests
-    local pr_cred_name="gha-$(echo "$repo" | tr '/' '-')-pr"
-    local pr_cred_exists
-    pr_cred_exists=$(az ad app federated-credential list --id "$client_id" \
-      --query "[?name=='$pr_cred_name'].id" -o tsv 2>/dev/null || true)
-    if [[ -z "$pr_cred_exists" ]]; then
-      az ad app federated-credential create --id "$client_id" --parameters "{
-        \"name\": \"$pr_cred_name\",
-        \"issuer\": \"https://token.actions.githubusercontent.com\",
-        \"subject\": \"repo:${repo}:pull_request\",
-        \"audiences\": [\"api://AzureADTokenExchange\"]
-      }" -o none
-      success "Created federated credential for $repo (pull requests)"
-    fi
+  local deploy_output
+  deploy_output=$(az deployment group create \
+    --resource-group "$rg_name" \
+    --template-file "$BICEP_FILE" \
+    --parameters \
+      environmentName="$env_name" \
+      identityName="$identity_name" \
+      location="$rg_location" \
+      githubRepos="$repos_json" \
+    --query "properties.outputs" \
+    -o json)
 
-    # Set GitHub secrets on the repo
-    if confirm "Set Azure secrets on $repo now?"; then
+  success "Bicep deployment complete"
+
+  # Extract outputs
+  local client_id tenant_id subscription_id aca_env_name aca_domain
+  client_id=$(echo "$deploy_output" | jq -r '.clientId.value')
+  tenant_id=$(echo "$deploy_output" | jq -r '.tenantId.value')
+  subscription_id=$(echo "$deploy_output" | jq -r '.subscriptionId.value')
+  aca_env_name=$(echo "$deploy_output" | jq -r '.acaEnvironmentName.value')
+  aca_domain=$(echo "$deploy_output" | jq -r '.acaDefaultDomain.value')
+
+  echo ""
+  success "Infrastructure deployed"
+  info "ACA environment: $aca_env_name"
+  info "ACA domain:      $aca_domain"
+  info "Client ID:       $client_id"
+  info "Tenant ID:       $tenant_id"
+  info "Subscription ID: $subscription_id"
+
+  # Set GitHub secrets on each repo
+  header "Setting GitHub secrets"
+  for repo in "${repos[@]}"; do
+    if confirm "Set Azure secrets on $repo?"; then
       gh secret set AZURE_CLIENT_ID --repo "$repo" --body "$client_id"
       gh secret set AZURE_TENANT_ID --repo "$repo" --body "$tenant_id"
-      gh secret set AZURE_SUBSCRIPTION_ID --repo "$repo" --body "$sub_id"
+      gh secret set AZURE_SUBSCRIPTION_ID --repo "$repo" --body "$subscription_id"
       success "Set AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID on $repo"
     fi
-
-    confirm "Add another repo?" && add_more=true || add_more=false
   done
 
   # Export for use by other steps
   export AZURE_RG="$rg_name"
   export AZURE_LOCATION="$rg_location"
-  export AZURE_ACA_ENV="$env_name"
+  export AZURE_ACA_ENV="$aca_env_name"
+  export AZURE_ACA_DOMAIN="$aca_domain"
   export AZURE_CLIENT_ID="$client_id"
-  export AZURE_TENANT_ID="$tenant_id"
-  export AZURE_SUBSCRIPTION_ID="$sub_id"
-
-  echo ""
-  success "Azure setup complete"
-  info "Resource group:  $rg_name ($rg_location)"
-  info "ACA environment: $env_name"
-  info "App (client) ID: $client_id"
 }
 
 # ─── Cloudflare setup ────────────────────────────────────────────────────────
@@ -342,7 +287,10 @@ setup_domain() {
   [[ -n "$subdomain" ]] || fail "Subdomain is required"
 
   local target
-  target=$(input "Target (ACA FQDN or IP)" "")
+  if [[ -n "${AZURE_ACA_DOMAIN:-}" ]]; then
+    info "ACA default domain: $AZURE_ACA_DOMAIN"
+  fi
+  target=$(input "Target (ACA FQDN or IP)" "${AZURE_ACA_DOMAIN:-}")
   [[ -n "$target" ]] || fail "Target is required"
 
   local record_type
