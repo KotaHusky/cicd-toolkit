@@ -1,11 +1,11 @@
-# Dependencies
-node_modules
+node_modules/
+dist/
+cdk.out/
+*.js
+*.d.ts
+*.js.map
+!jest.config.js
+!vitest.config.ts
 
-# OS
-.DS_Store
-
-# Turbo
-.turbo
-
-# Claude
-.claude
+.env
+.env.*

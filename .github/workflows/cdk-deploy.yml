@@ -1,0 +1,47 @@
+name: CDK Deploy
+
+on:
+  workflow_call:
+    inputs:
+      aws-region:
+        type: string
+        default: 'us-east-1'
+      node-version:
+        type: string
+        default: '24'
+      working-directory:
+        type: string
+        default: '.'
+    secrets:
+      role-arn:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - run: npm ci
+        working-directory: ${{ inputs.working-directory }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.role-arn }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - run: npx cdk diff
+        working-directory: ${{ inputs.working-directory }}
+
+      - run: npx cdk deploy --all --require-approval never
+        working-directory: ${{ inputs.working-directory }}
