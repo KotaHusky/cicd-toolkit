@@ -5,27 +5,32 @@ set -euo pipefail
 # Azure Container Apps Setup Wizard
 # =============================================================================
 #
-# One-time interactive setup for deploying a container app to Azure Container
-# Apps with GitHub Actions CI/CD. Project-agnostic — works for any app.
+# Deploys infra/main.bicep and handles the things Bicep can't:
+#   - Resource provider registration
+#   - Service principal creation
+#   - GitHub Actions secret setup
 #
-# Saves selections to .setup-aca.env so re-runs pre-fill your previous values.
+# Saves selections to .setup-aca.env so re-runs pre-fill previous values.
+# The Bicep deployment is idempotent — safe to re-run.
 #
 # Prerequisites:
 #   - az CLI installed and logged in (az login)
 #   - gh CLI installed and logged in (gh auth login)
 # =============================================================================
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BICEP_FILE="${SCRIPT_DIR}/../infra/main.bicep"
 CONFIG_FILE=".setup-aca.env"
 
 echo ""
 echo "=== Azure Container Apps Setup Wizard ==="
 echo ""
 echo "This script will:"
-echo "  1. Create an Azure resource group"
-echo "  2. Create a Container Apps environment"
-echo "  3. Create a Container App from your GHCR image"
+echo "  1. Register required Azure resource providers"
+echo "  2. Create a resource group"
+echo "  3. Deploy Container Apps infrastructure (Bicep)"
 echo "  4. Create a service principal for GitHub Actions"
-echo "  5. Output the secrets to configure in GitHub"
+echo "  5. Set the AZURE_CREDENTIALS secret in GitHub"
 echo ""
 echo "Prerequisites: az CLI logged in, gh CLI logged in"
 echo ""
@@ -49,6 +54,11 @@ fi
 
 if ! gh auth status &> /dev/null; then
   echo "Error: Not logged in to GitHub CLI. Run: gh auth login"
+  exit 1
+fi
+
+if [[ ! -f "$BICEP_FILE" ]]; then
+  echo "Error: Bicep template not found at ${BICEP_FILE}"
   exit 1
 fi
 
@@ -98,8 +108,6 @@ prompt TARGET_PORT    "Target port"                 "${SAVED_TARGET_PORT:-3000}"
 prompt MIN_REPLICAS   "Min replicas"                "${SAVED_MIN_REPLICAS:-1}"
 prompt GITHUB_REPO    "GitHub repo for secrets"     "${SAVED_GITHUB_REPO:-$DEFAULT_REPO}"
 
-ENV_NAME="${APP_NAME}-env"
-
 # ---- Save selections --------------------------------------------------------
 
 cat > "$CONFIG_FILE" <<CONF
@@ -124,7 +132,6 @@ echo "  Region:          ${LOCATION}"
 echo "  Image:           ${IMAGE}"
 echo "  Target port:     ${TARGET_PORT}"
 echo "  Min replicas:    ${MIN_REPLICAS}"
-echo "  Environment:     ${ENV_NAME}"
 echo "  GitHub repo:     ${GITHUB_REPO}"
 echo ""
 
@@ -152,31 +159,30 @@ az group create \
   --location "$LOCATION" \
   --output table
 
-# ---- 3. Container Apps Environment -------------------------------------------
+# ---- 3. Bicep Deployment -----------------------------------------------------
 
 echo ""
-echo "--- Creating Container Apps environment: ${ENV_NAME} ---"
-az containerapp env create \
-  --name "$ENV_NAME" \
+echo "--- Deploying infrastructure (Bicep) ---"
+DEPLOY_OUTPUT=$(az deployment group create \
   --resource-group "$RESOURCE_GROUP" \
-  --location "$LOCATION" \
-  --output table
+  --template-file "$BICEP_FILE" \
+  --parameters \
+    appName="$APP_NAME" \
+    image="$IMAGE" \
+    targetPort="$TARGET_PORT" \
+    minReplicas="$MIN_REPLICAS" \
+    location="$LOCATION" \
+  --query "properties.outputs" \
+  --output json)
 
-# ---- 4. Container App --------------------------------------------------------
+FQDN=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['fqdn']['value'])")
 
+echo "Infrastructure deployed."
 echo ""
-echo "--- Creating Container App: ${APP_NAME} ---"
-az containerapp create \
-  --name "$APP_NAME" \
-  --resource-group "$RESOURCE_GROUP" \
-  --environment "$ENV_NAME" \
-  --image "$IMAGE" \
-  --target-port "$TARGET_PORT" \
-  --ingress external \
-  --min-replicas "$MIN_REPLICAS" \
-  --output table
+echo "=== Your app is live at ==="
+echo "  https://${FQDN}"
 
-# ---- 5. Service Principal for GitHub Actions ---------------------------------
+# ---- 4. Service Principal for GitHub Actions ---------------------------------
 
 echo ""
 echo "--- Creating service principal for GitHub Actions ---"
@@ -190,24 +196,11 @@ SP_JSON=$(az ad sp create-for-rbac \
   --scopes "$RG_ID" \
   --sdk-auth)
 
-echo ""
 echo "Service principal created."
 
-# ---- 6. Show FQDN -----------------------------------------------------------
-
-FQDN=$(az containerapp show \
-  --name "$APP_NAME" \
-  --resource-group "$RESOURCE_GROUP" \
-  --query "properties.configuration.ingress.fqdn" \
-  -o tsv)
+# ---- 5. Set GitHub Secret ----------------------------------------------------
 
 echo ""
-echo "=== Your app is live at ==="
-echo "  https://${FQDN}"
-echo ""
-
-# ---- 7. Set GitHub Secret ----------------------------------------------------
-
 read -rp "Set AZURE_CREDENTIALS secret in ${GITHUB_REPO}? (y/N): " set_secret
 if [[ "${set_secret}" == "y" || "${set_secret}" == "Y" ]]; then
   echo "$SP_JSON" | gh secret set AZURE_CREDENTIALS --repo "$GITHUB_REPO"
@@ -231,7 +224,7 @@ echo "  2. Set proxy status: Proxied (orange cloud)"
 echo "  3. Generate an Origin Certificate (SSL/TLS > Origin Server)"
 echo "  4. Upload it to ACA:"
 echo "     az containerapp env certificate upload \\"
-echo "       --name ${ENV_NAME} \\"
+echo "       --name ${APP_NAME}-env \\"
 echo "       --resource-group ${RESOURCE_GROUP} \\"
 echo "       --certificate-file <path-to-cert.pem> \\"
 echo "       --private-key-file <path-to-key.pem>"
