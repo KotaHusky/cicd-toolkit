@@ -1,0 +1,151 @@
+name: Reusable AI-Powered Release
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: 'Claude model to use'
+        required: false
+        type: string
+        default: 'claude-sonnet-4-5-20250929'
+      draft:
+        description: 'Create as draft release'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      ANTHROPIC_API_KEY:
+        description: 'Anthropic API key for Claude'
+        required: true
+    outputs:
+      release-url:
+        description: 'URL of the created release'
+        value: ${{ jobs.release.outputs.release-url }}
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      release-url: ${{ steps.create-release.outputs.release-url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+
+      - name: Gather changelog
+        id: changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CURRENT_TAG="${{ github.ref_name }}"
+          echo "current-tag=${CURRENT_TAG}" >> "$GITHUB_OUTPUT"
+
+          # Find the previous semver tag (skip the current one)
+          PREVIOUS_TAG=$(git tag --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -n 1)
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            echo "Previous tag: ${PREVIOUS_TAG}"
+            # Use GitHub API to compare tags (avoids needing full git history)
+            COMMITS=$(gh api "repos/${{ github.repository }}/compare/${PREVIOUS_TAG}...${CURRENT_TAG}" \
+              --jq '[.commits[] | select(.parents | length == 1) | "- \(.commit.message | split("\n")[0]) (\(.sha[:7]))"] | join("\n")')
+          else
+            echo "No previous tag found, using all commits up to tag"
+            COMMITS=$(gh api "repos/${{ github.repository }}/commits?sha=${CURRENT_TAG}&per_page=100" \
+              --jq '[.[] | select(.parents | length == 1) | "- \(.commit.message | split("\n")[0]) (\(.sha[:7]))"] | join("\n")')
+          fi
+
+          # Write to file to avoid shell escaping issues
+          echo "$COMMITS" > /tmp/changelog.txt
+          echo "Changelog:"
+          cat /tmp/changelog.txt
+
+      - name: Generate release notes with Claude
+        id: claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          CHANGELOG=$(cat /tmp/changelog.txt)
+
+          # Build request body safely with jq
+          REQUEST_BODY=$(jq -n \
+            --arg model "${{ inputs.model }}" \
+            --arg changelog "$CHANGELOG" \
+            '{
+              model: $model,
+              max_tokens: 1024,
+              messages: [
+                {
+                  role: "user",
+                  content: ("You are a release-notes assistant. Given the following commit log, produce a JSON object with exactly two fields:\n- \"title\": a very short title (3-5 words) summarizing the release theme. Do NOT include a version number.\n- \"summary\": a concise paragraph (2-4 sentences) describing what changed for end users.\n\nRespond with ONLY the JSON object, no markdown fences or extra text.\n\nCommit log:\n" + $changelog)
+                }
+              ]
+            }')
+
+          # Call Claude API
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            https://api.anthropic.com/v1/messages \
+            -H "content-type: application/json" \
+            -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "$REQUEST_BODY")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::Claude API returned HTTP ${HTTP_CODE}"
+            echo "$BODY" >&2
+            exit 1
+          fi
+
+          # Extract the text content from Claude's response, then parse the JSON within
+          CONTENT=$(echo "$BODY" | jq -r '.content[0].text')
+          TITLE=$(echo "$CONTENT" | jq -r '.title')
+          SUMMARY=$(echo "$CONTENT" | jq -r '.summary')
+
+          if [ "$TITLE" = "null" ] || [ "$SUMMARY" = "null" ]; then
+            echo "::error::Failed to parse Claude response"
+            echo "Raw content: $CONTENT" >&2
+            exit 1
+          fi
+
+          echo "Title: $TITLE"
+          echo "Summary: $SUMMARY"
+
+          # Write to file to preserve newlines and special characters
+          echo "$TITLE" > /tmp/release_title.txt
+          echo "$SUMMARY" > /tmp/release_summary.txt
+
+      - name: Create GitHub Release
+        id: create-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.changelog.outputs.current-tag }}"
+          TITLE=$(cat /tmp/release_title.txt)
+          SUMMARY=$(cat /tmp/release_summary.txt)
+          CHANGELOG=$(cat /tmp/changelog.txt)
+
+          RELEASE_TITLE="${TAG} — ${TITLE}"
+
+          # Use printf to avoid YAML indentation leaking into the body
+          RELEASE_BODY=$(printf '%s\n\n## Changelog\n\n%s' "$SUMMARY" "$CHANGELOG")
+
+          DRAFT_FLAG=""
+          if [ "${{ inputs.draft }}" = "true" ]; then
+            DRAFT_FLAG="--draft"
+          fi
+
+          RELEASE_URL=$(gh release create "$TAG" \
+            --title "$RELEASE_TITLE" \
+            --notes "$RELEASE_BODY" \
+            --verify-tag \
+            $DRAFT_FLAG)
+
+          echo "release-url=${RELEASE_URL}" >> "$GITHUB_OUTPUT"
+          echo "Release created: ${RELEASE_URL}"
