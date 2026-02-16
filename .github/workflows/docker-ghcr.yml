@@ -31,6 +31,11 @@ on:
         required: false
         type: string
         default: 'linux/amd64'
+      version:
+        description: 'Semantic version to tag (e.g. 1.2.3). When set, adds vX.Y.Z, vX.Y, vX tags.'
+        required: false
+        type: string
+        default: ''
     outputs:
       tags:
         description: 'Generated image tags'
@@ -64,6 +69,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute semver tags
+        id: semver
+        if: inputs.version != ''
+        run: |
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${{ inputs.version }}"
+          echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
+          echo "minor=${MAJOR}.${MINOR}" >> "$GITHUB_OUTPUT"
+          echo "full=${MAJOR}.${MINOR}.${PATCH}" >> "$GITHUB_OUTPUT"
+
       - name: Generate image metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -73,6 +87,9 @@ jobs:
             type=sha,prefix=sha-
             type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=v${{ steps.semver.outputs.full }},enable=${{ inputs.version != '' }}
+            type=raw,value=v${{ steps.semver.outputs.minor }},enable=${{ inputs.version != '' }}
+            type=raw,value=v${{ steps.semver.outputs.major }},enable=${{ inputs.version != '' }}
 
       - name: Build and push
         id: build-push
