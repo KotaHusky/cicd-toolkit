@@ -1,0 +1,20 @@
+# Example release pipeline using cicd-toolkit reusable workflows.
+# Copy this file to your repo at .github/workflows/release.yml.
+# Then push a semver tag (e.g. v1.0.0) to trigger it.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/release.yml@main
+    permissions:
+      contents: write
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    # with:
+    #   model: 'claude-sonnet-4-5-20250929'   # default
+    #   draft: false                            # default

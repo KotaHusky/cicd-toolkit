@@ -1,0 +1,32 @@
+# Example CI pipeline using cicd-toolkit reusable workflows.
+# Copy this file to your repo at .github/workflows/ci.yml and adjust as needed.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/build-verify.yml@main
+    with:
+      node-version: '24'
+      # run-build: false   # skip build step
+      # run-tests: false   # skip test step
+      # run-lint: false    # skip lint step
+
+  docker:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    uses: KotaHusky/cicd-toolkit/.github/workflows/docker-ghcr.yml@main
+    permissions:
+      contents: read
+      packages: write
+    with:
+      platforms: 'linux/amd64'
+      # dockerfile: './Dockerfile'
+      # context: '.'
+      # push: true
