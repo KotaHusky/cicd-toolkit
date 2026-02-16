@@ -1,0 +1,436 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─── cicd-toolkit setup wizard ───────────────────────────────────────────────
+# Interactive setup for Azure Container Apps + Cloudflare DNS + GitHub secrets.
+# Prerequisites: az, gh (and optionally gum for a nicer UX).
+# Usage: ./bin/setup
+
+BOLD="\033[1m"
+DIM="\033[2m"
+CYAN="\033[36m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+RED="\033[31m"
+RESET="\033[0m"
+
+HAS_GUM=false
+command -v gum &>/dev/null && HAS_GUM=true
+
+# ─── UI helpers ──────────────────────────────────────────────────────────────
+
+header() { echo -e "\n${BOLD}${CYAN}▸ $1${RESET}"; }
+success() { echo -e "${GREEN}✔ $1${RESET}"; }
+warn() { echo -e "${YELLOW}⚠ $1${RESET}"; }
+fail() { echo -e "${RED}✖ $1${RESET}"; exit 1; }
+info() { echo -e "${DIM}  $1${RESET}"; }
+
+confirm() {
+  local prompt="$1"
+  if $HAS_GUM; then
+    gum confirm "$prompt" && return 0 || return 1
+  else
+    read -rp "$prompt [y/N] " yn
+    [[ "$yn" =~ ^[Yy]$ ]]
+  fi
+}
+
+input() {
+  local prompt="$1" default="${2:-}"
+  if $HAS_GUM; then
+    gum input --placeholder "$prompt" --value "$default"
+  else
+    read -rp "$prompt${default:+ [$default]}: " val
+    echo "${val:-$default}"
+  fi
+}
+
+choose() {
+  local prompt="$1"
+  shift
+  if $HAS_GUM; then
+    gum choose --header "$prompt" "$@"
+  else
+    echo "$prompt" >&2
+    select opt in "$@"; do
+      [[ -n "$opt" ]] && echo "$opt" && break
+    done
+  fi
+}
+
+password() {
+  local prompt="$1"
+  if $HAS_GUM; then
+    gum input --password --placeholder "$prompt"
+  else
+    read -rsp "$prompt: " val; echo >&2; echo "$val"
+  fi
+}
+
+# ─── Prerequisite checks ────────────────────────────────────────────────────
+
+check_prereqs() {
+  header "Checking prerequisites"
+  local missing=()
+  command -v az &>/dev/null  || missing+=("az (Azure CLI)")
+  command -v gh &>/dev/null  || missing+=("gh (GitHub CLI)")
+  command -v jq &>/dev/null  || missing+=("jq")
+  command -v curl &>/dev/null || missing+=("curl")
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    fail "Missing required tools: ${missing[*]}"
+  fi
+  success "az, gh, jq, curl found"
+
+  if $HAS_GUM; then
+    success "gum found (nice UX enabled)"
+  else
+    info "Install 'gum' for a nicer experience: brew install gum"
+  fi
+
+  # Check logins
+  az account show &>/dev/null || fail "Not logged in to Azure. Run: az login"
+  gh auth status &>/dev/null  || fail "Not logged in to GitHub. Run: gh auth login"
+  success "Authenticated to Azure and GitHub"
+}
+
+# ─── Azure setup ─────────────────────────────────────────────────────────────
+
+setup_azure() {
+  header "Azure Container Apps setup"
+
+  # Subscription
+  local sub_id sub_name
+  sub_id=$(az account show --query id -o tsv)
+  sub_name=$(az account show --query name -o tsv)
+  info "Using subscription: $sub_name ($sub_id)"
+  confirm "Use this subscription?" || fail "Switch subscription with: az account set -s <id>"
+
+  # Tenant
+  local tenant_id
+  tenant_id=$(az account show --query tenantId -o tsv)
+
+  # Resource group
+  header "Resource group"
+  local rg_action
+  rg_action=$(choose "Create new or use existing resource group?" "Create new" "Use existing")
+  local rg_name rg_location
+  if [[ "$rg_action" == "Create new" ]]; then
+    rg_name=$(input "Resource group name" "rg-homepage")
+    rg_location=$(input "Azure region" "eastus")
+    az group create --name "$rg_name" --location "$rg_location" -o none
+    success "Created resource group: $rg_name"
+  else
+    rg_name=$(az group list --query "[].name" -o tsv | choose "Select resource group:")
+    rg_location=$(az group show --name "$rg_name" --query location -o tsv)
+    success "Using resource group: $rg_name ($rg_location)"
+  fi
+
+  # Container Apps environment
+  header "Container Apps environment"
+  local env_name
+  local existing_envs
+  existing_envs=$(az containerapp env list --resource-group "$rg_name" --query "[].name" -o tsv 2>/dev/null || true)
+  if [[ -n "$existing_envs" ]]; then
+    local env_action
+    env_action=$(choose "Create new or use existing environment?" "Create new" "Use existing")
+    if [[ "$env_action" == "Use existing" ]]; then
+      env_name=$(echo "$existing_envs" | choose "Select environment:")
+    fi
+  fi
+  if [[ -z "${env_name:-}" ]]; then
+    env_name=$(input "Environment name" "aca-env")
+    az containerapp env create \
+      --name "$env_name" \
+      --resource-group "$rg_name" \
+      --location "$rg_location" \
+      -o none
+    success "Created Container Apps environment: $env_name"
+  else
+    success "Using environment: $env_name"
+  fi
+
+  # App registration + OIDC federated credentials
+  header "Azure AD app registration (for GitHub OIDC)"
+  local app_name
+  app_name=$(input "App registration name" "github-actions-oidc")
+
+  local client_id
+  # Check if app already exists
+  client_id=$(az ad app list --display-name "$app_name" --query "[0].appId" -o tsv 2>/dev/null || true)
+  if [[ -n "$client_id" && "$client_id" != "None" ]]; then
+    success "App registration already exists: $app_name ($client_id)"
+  else
+    client_id=$(az ad app create --display-name "$app_name" --query appId -o tsv)
+    success "Created app registration: $app_name ($client_id)"
+  fi
+
+  # Service principal
+  local sp_exists
+  sp_exists=$(az ad sp list --filter "appId eq '$client_id'" --query "[0].id" -o tsv 2>/dev/null || true)
+  if [[ -z "$sp_exists" || "$sp_exists" == "None" ]]; then
+    az ad sp create --id "$client_id" -o none
+    success "Created service principal"
+  else
+    success "Service principal already exists"
+  fi
+
+  # Role assignment — Contributor on resource group
+  local sp_object_id
+  sp_object_id=$(az ad sp list --filter "appId eq '$client_id'" --query "[0].id" -o tsv)
+  local role_exists
+  role_exists=$(az role assignment list \
+    --assignee "$sp_object_id" \
+    --role "Contributor" \
+    --scope "/subscriptions/${sub_id}/resourceGroups/${rg_name}" \
+    --query "[0].id" -o tsv 2>/dev/null || true)
+  if [[ -z "$role_exists" ]]; then
+    az role assignment create \
+      --assignee-object-id "$sp_object_id" \
+      --assignee-principal-type ServicePrincipal \
+      --role "Contributor" \
+      --scope "/subscriptions/${sub_id}/resourceGroups/${rg_name}" \
+      -o none
+    success "Assigned Contributor role on $rg_name"
+  else
+    success "Contributor role already assigned"
+  fi
+
+  # Federated credentials for each repo
+  header "GitHub OIDC federated credentials"
+  info "Add federated credentials for each repo that will deploy."
+  local add_more=true
+  while $add_more; do
+    local repo
+    repo=$(input "GitHub repo (owner/name)" "")
+    if [[ -z "$repo" ]]; then break; fi
+
+    local cred_name
+    cred_name="gha-$(echo "$repo" | tr '/' '-')-main"
+
+    local cred_exists
+    cred_exists=$(az ad app federated-credential list --id "$client_id" \
+      --query "[?name=='$cred_name'].id" -o tsv 2>/dev/null || true)
+    if [[ -n "$cred_exists" ]]; then
+      success "Federated credential already exists: $cred_name"
+    else
+      az ad app federated-credential create --id "$client_id" --parameters "{
+        \"name\": \"$cred_name\",
+        \"issuer\": \"https://token.actions.githubusercontent.com\",
+        \"subject\": \"repo:${repo}:ref:refs/heads/main\",
+        \"audiences\": [\"api://AzureADTokenExchange\"]
+      }" -o none
+      success "Created federated credential for $repo (main branch)"
+    fi
+
+    # Also add credential for pull requests
+    local pr_cred_name="gha-$(echo "$repo" | tr '/' '-')-pr"
+    local pr_cred_exists
+    pr_cred_exists=$(az ad app federated-credential list --id "$client_id" \
+      --query "[?name=='$pr_cred_name'].id" -o tsv 2>/dev/null || true)
+    if [[ -z "$pr_cred_exists" ]]; then
+      az ad app federated-credential create --id "$client_id" --parameters "{
+        \"name\": \"$pr_cred_name\",
+        \"issuer\": \"https://token.actions.githubusercontent.com\",
+        \"subject\": \"repo:${repo}:pull_request\",
+        \"audiences\": [\"api://AzureADTokenExchange\"]
+      }" -o none
+      success "Created federated credential for $repo (pull requests)"
+    fi
+
+    # Set GitHub secrets on the repo
+    if confirm "Set Azure secrets on $repo now?"; then
+      gh secret set AZURE_CLIENT_ID --repo "$repo" --body "$client_id"
+      gh secret set AZURE_TENANT_ID --repo "$repo" --body "$tenant_id"
+      gh secret set AZURE_SUBSCRIPTION_ID --repo "$repo" --body "$sub_id"
+      success "Set AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID on $repo"
+    fi
+
+    confirm "Add another repo?" && add_more=true || add_more=false
+  done
+
+  # Export for use by other steps
+  export AZURE_RG="$rg_name"
+  export AZURE_LOCATION="$rg_location"
+  export AZURE_ACA_ENV="$env_name"
+  export AZURE_CLIENT_ID="$client_id"
+  export AZURE_TENANT_ID="$tenant_id"
+  export AZURE_SUBSCRIPTION_ID="$sub_id"
+
+  echo ""
+  success "Azure setup complete"
+  info "Resource group:  $rg_name ($rg_location)"
+  info "ACA environment: $env_name"
+  info "App (client) ID: $client_id"
+}
+
+# ─── Cloudflare setup ────────────────────────────────────────────────────────
+
+setup_cloudflare() {
+  header "Cloudflare setup"
+
+  info "You need a Cloudflare API token with Zone:DNS:Edit and Zone:Cache Purge permissions."
+  info "Create one at: https://dash.cloudflare.com/profile/api-tokens"
+  echo ""
+  local cf_token
+  cf_token=$(password "Cloudflare API token")
+
+  # Verify token
+  local verify
+  verify=$(curl -sf "https://api.cloudflare.com/client/v4/user/tokens/verify" \
+    -H "Authorization: Bearer $cf_token" | jq -r '.success')
+  [[ "$verify" == "true" ]] || fail "Invalid Cloudflare API token"
+  success "API token verified"
+
+  # List zones and pick one
+  header "Select DNS zone"
+  local zones_json
+  zones_json=$(curl -sf "https://api.cloudflare.com/client/v4/zones?per_page=50" \
+    -H "Authorization: Bearer $cf_token" \
+    -H "Content-Type: application/json")
+
+  local zone_names
+  zone_names=$(echo "$zones_json" | jq -r '.result[].name')
+  [[ -n "$zone_names" ]] || fail "No zones found. Is the token scoped to a zone?"
+
+  local zone_name
+  zone_name=$(echo "$zone_names" | choose "Select your domain:")
+  local zone_id
+  zone_id=$(echo "$zones_json" | jq -r --arg name "$zone_name" '.result[] | select(.name==$name) | .id')
+  success "Selected zone: $zone_name ($zone_id)"
+
+  # Set GitHub secrets on repos
+  header "Set Cloudflare secrets on GitHub repos"
+  local add_more=true
+  while $add_more; do
+    local repo
+    repo=$(input "GitHub repo (owner/name)" "")
+    if [[ -z "$repo" ]]; then break; fi
+
+    gh secret set CLOUDFLARE_API_TOKEN --repo "$repo" --body "$cf_token"
+    gh secret set CLOUDFLARE_ZONE_ID --repo "$repo" --body "$zone_id"
+    success "Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID on $repo"
+
+    confirm "Add another repo?" && add_more=true || add_more=false
+  done
+
+  export CF_ZONE_NAME="$zone_name"
+  export CF_ZONE_ID="$zone_id"
+  export CF_TOKEN="$cf_token"
+
+  echo ""
+  success "Cloudflare setup complete"
+  info "Zone: $zone_name ($zone_id)"
+}
+
+# ─── Domain mapping ─────────────────────────────────────────────────────────
+
+setup_domain() {
+  header "Custom domain mapping"
+
+  if [[ -z "${CF_TOKEN:-}" ]]; then
+    warn "Run Cloudflare setup first, or provide credentials."
+    local cf_token zone_id
+    cf_token=$(password "Cloudflare API token")
+    zone_id=$(input "Cloudflare Zone ID" "")
+    export CF_TOKEN="$cf_token"
+    export CF_ZONE_ID="$zone_id"
+  fi
+
+  local subdomain
+  subdomain=$(input "Subdomain to map (e.g. app.example.com)" "")
+  [[ -n "$subdomain" ]] || fail "Subdomain is required"
+
+  local target
+  target=$(input "Target (ACA FQDN or IP)" "")
+  [[ -n "$target" ]] || fail "Target is required"
+
+  local record_type
+  record_type=$(choose "DNS record type:" "CNAME" "A" "AAAA")
+
+  local proxied
+  confirm "Enable Cloudflare proxy (orange cloud)?" && proxied=true || proxied=false
+
+  # Check if record exists
+  local existing
+  existing=$(curl -sf \
+    "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${subdomain}&type=${record_type}" \
+    -H "Authorization: Bearer ${CF_TOKEN}" | jq -r '.result[0].id // empty')
+
+  local payload
+  payload=$(jq -n \
+    --arg type "$record_type" \
+    --arg name "$subdomain" \
+    --arg content "$target" \
+    --argjson proxied "$proxied" \
+    '{type: $type, name: $name, content: $content, proxied: $proxied}')
+
+  if [[ -n "$existing" ]]; then
+    curl -sf -X PUT \
+      "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${existing}" \
+      -H "Authorization: Bearer ${CF_TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data "$payload" | jq -r '.result | "\(.name) → \(.content) (\(.type), proxied=\(.proxied))"'
+    success "Updated DNS record"
+  else
+    curl -sf -X POST \
+      "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" \
+      -H "Authorization: Bearer ${CF_TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data "$payload" | jq -r '.result | "\(.name) → \(.content) (\(.type), proxied=\(.proxied))"'
+    success "Created DNS record"
+  fi
+
+  if [[ "$proxied" == "true" ]]; then
+    echo ""
+    warn "Cloudflare proxy is ON. For ACA custom domains:"
+    info "1. Set Cloudflare SSL mode to Full (Strict)"
+    info "2. Use a Cloudflare Origin Certificate on ACA (not ACA managed certs)"
+    info "   Docs: dash.cloudflare.com → SSL/TLS → Origin Server → Create Certificate"
+  fi
+}
+
+# ─── Main menu ───────────────────────────────────────────────────────────────
+
+main() {
+  echo -e "${BOLD}${CYAN}"
+  echo "  ┌──────────────────────────────────┐"
+  echo "  │  cicd-toolkit setup wizard        │"
+  echo "  │  Azure Container Apps + Cloudflare│"
+  echo "  └──────────────────────────────────┘"
+  echo -e "${RESET}"
+
+  check_prereqs
+
+  local action
+  action=$(choose "What do you want to set up?" \
+    "Full setup (Azure + Cloudflare + DNS)" \
+    "Azure Container Apps only" \
+    "Cloudflare DNS only" \
+    "Map a custom domain")
+
+  case "$action" in
+    "Full setup"*)
+      setup_azure
+      setup_cloudflare
+      if confirm "Map a custom domain now?"; then
+        setup_domain
+      fi
+      ;;
+    "Azure Container Apps only")
+      setup_azure
+      ;;
+    "Cloudflare DNS only")
+      setup_cloudflare
+      ;;
+    "Map a custom domain")
+      setup_domain
+      ;;
+  esac
+
+  echo ""
+  echo -e "${BOLD}${GREEN}Done!${RESET} Your repos are ready to deploy."
+  info "Push a commit to main and the CI pipeline will handle the rest."
+}
+
+main "$@"
