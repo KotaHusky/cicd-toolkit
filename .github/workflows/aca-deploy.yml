@@ -1,0 +1,94 @@
+name: Reusable Azure Container Apps Deploy
+
+on:
+  workflow_call:
+    inputs:
+      resource-group:
+        description: 'Azure resource group name'
+        required: true
+        type: string
+      container-app-name:
+        description: 'Container App name'
+        required: true
+        type: string
+      image:
+        description: 'Full container image URI (e.g. ghcr.io/owner/repo:tag)'
+        required: true
+        type: string
+      target-port:
+        description: 'Container listening port'
+        required: false
+        type: number
+        default: 3000
+      ingress:
+        description: 'Ingress type (external or internal)'
+        required: false
+        type: string
+        default: 'external'
+      location:
+        description: 'Azure region'
+        required: false
+        type: string
+        default: 'eastus'
+      container-app-environment:
+        description: 'Container App environment name (auto-created if missing)'
+        required: false
+        type: string
+        default: ''
+      environment-variables:
+        description: 'Environment variables (space-separated KEY=VALUE)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+    outputs:
+      fqdn:
+        description: 'Deployed app FQDN'
+        value: ${{ jobs.deploy.outputs.fqdn }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to ACA
+    runs-on: ubuntu-latest
+    outputs:
+      fqdn: ${{ steps.fqdn.outputs.fqdn }}
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Container Apps
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          resourceGroup: ${{ inputs.resource-group }}
+          containerAppName: ${{ inputs.container-app-name }}
+          imageToDeploy: ${{ inputs.image }}
+          targetPort: ${{ inputs.target-port }}
+          ingress: ${{ inputs.ingress }}
+          location: ${{ inputs.location }}
+          containerAppEnvironment: ${{ inputs.container-app-environment || '' }}
+          environmentVariables: ${{ inputs.environment-variables }}
+
+      - name: Get app FQDN
+        id: fqdn
+        run: |
+          FQDN=$(az containerapp show \
+            --name "${{ inputs.container-app-name }}" \
+            --resource-group "${{ inputs.resource-group }}" \
+            --query "properties.configuration.ingress.fqdn" \
+            --output tsv)
+          echo "fqdn=${FQDN}" >> "$GITHUB_OUTPUT"
+          echo "Deployed to: https://${FQDN}"

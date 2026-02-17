@@ -1,0 +1,85 @@
+name: Reusable Cloudflare DNS Update
+
+on:
+  workflow_call:
+    inputs:
+      record-name:
+        description: 'DNS record name (e.g. app.example.com)'
+        required: true
+        type: string
+      record-type:
+        description: 'DNS record type (A, AAAA, CNAME)'
+        required: false
+        type: string
+        default: 'CNAME'
+      record-content:
+        description: 'DNS record content (IP address or hostname)'
+        required: true
+        type: string
+      proxied:
+        description: 'Enable Cloudflare proxy (orange cloud)'
+        required: false
+        type: boolean
+        default: true
+      purge-cache:
+        description: 'Purge Cloudflare cache after DNS update'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: true
+      CLOUDFLARE_ZONE_ID:
+        required: true
+
+jobs:
+  dns:
+    name: Update DNS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update DNS record
+        run: |
+          ZONE_ID="${{ secrets.CLOUDFLARE_ZONE_ID }}"
+          API_TOKEN="${{ secrets.CLOUDFLARE_API_TOKEN }}"
+          RECORD_NAME="${{ inputs.record-name }}"
+          RECORD_TYPE="${{ inputs.record-type }}"
+          RECORD_CONTENT="${{ inputs.record-content }}"
+          PROXIED="${{ inputs.proxied }}"
+
+          # Look up existing record
+          RECORD_ID=$(curl -sf \
+            "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records?name=${RECORD_NAME}&type=${RECORD_TYPE}" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            -H "Content-Type: application/json" | jq -r '.result[0].id // empty')
+
+          PAYLOAD=$(jq -n \
+            --arg type "${RECORD_TYPE}" \
+            --arg name "${RECORD_NAME}" \
+            --arg content "${RECORD_CONTENT}" \
+            --argjson proxied "${PROXIED}" \
+            '{type: $type, name: $name, content: $content, proxied: $proxied}')
+
+          if [ -n "${RECORD_ID}" ]; then
+            echo "Updating existing record ${RECORD_ID}"
+            curl -sf -X PUT \
+              "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records/${RECORD_ID}" \
+              -H "Authorization: Bearer ${API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data "${PAYLOAD}" | jq .
+          else
+            echo "Creating new record"
+            curl -sf -X POST \
+              "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records" \
+              -H "Authorization: Bearer ${API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data "${PAYLOAD}" | jq .
+          fi
+
+      - name: Purge cache
+        if: inputs.purge-cache
+        run: |
+          curl -sf -X POST \
+            "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}' | jq .
