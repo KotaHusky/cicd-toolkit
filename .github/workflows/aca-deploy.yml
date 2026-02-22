@@ -40,6 +40,16 @@ on:
         required: false
         type: string
         default: ''
+      registry-url:
+        description: 'Container registry URL (e.g. ghcr.io)'
+        required: false
+        type: string
+        default: ''
+      registry-username:
+        description: 'Registry username (required if registry-url is set)'
+        required: false
+        type: string
+        default: ''
     secrets:
       AZURE_CLIENT_ID:
         required: true
@@ -47,6 +57,8 @@ on:
         required: true
       AZURE_SUBSCRIPTION_ID:
         required: true
+      REGISTRY_TOKEN:
+        required: false
     outputs:
       fqdn:
         description: 'Deployed app FQDN'
@@ -81,6 +93,9 @@ jobs:
           location: ${{ inputs.location }}
           containerAppEnvironment: ${{ inputs.container-app-environment || '' }}
           environmentVariables: ${{ inputs.environment-variables }}
+          registryUrl: ${{ inputs.registry-url }}
+          registryUsername: ${{ inputs.registry-username }}
+          registryPassword: ${{ secrets.REGISTRY_TOKEN }}
 
       - name: Get app FQDN
         id: fqdn
