@@ -1,0 +1,60 @@
+# Reusable workflow: provisions Azure Container Apps infrastructure via Bicep.
+# Intended for Day-2 infra updates after initial bootstrap.
+# For initial bootstrap (before secrets exist), run locally:
+#   az group create -n <resource-group> -l <location>
+#   az deployment group create -g <resource-group> -f infra/main.bicep
+
+name: Provision ACA Infrastructure
+
+on:
+  workflow_call:
+    inputs:
+      resource-group:
+        description: Azure resource group name
+        required: true
+        type: string
+      location:
+        description: Azure region
+        required: false
+        type: string
+        default: eastus
+      bicep-file:
+        description: Path to the Bicep template in the calling repo
+        required: false
+        type: string
+        default: infra/main.bicep
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure resource group exists
+        run: |
+          az group create \
+            --name "${{ inputs.resource-group }}" \
+            --location "${{ inputs.location }}"
+
+      - name: Deploy Bicep template
+        uses: azure/arm-deploy@v2
+        with:
+          resourceGroupName: ${{ inputs.resource-group }}
+          template: ${{ inputs.bicep-file }}
+          failOnStdErr: false
