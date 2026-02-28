@@ -35,7 +35,9 @@ export class OidcBootstrapStack extends cdk.Stack {
 
     for (const roleDef of props.roles) {
       const branch = roleDef.branch ?? 'main';
-      const repoFilter = `repo:${props.githubOrg}/${roleDef.repo}:ref:refs/heads/${branch}`;
+      const repoFilter = branch === '*'
+        ? `repo:${props.githubOrg}/${roleDef.repo}:*`
+        : `repo:${props.githubOrg}/${roleDef.repo}:ref:refs/heads/${branch}`;
 
       const role = new iam.Role(this, `Role-${roleDef.repo}`, {
         roleName: roleDef.roleName,
