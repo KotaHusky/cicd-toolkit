@@ -27,6 +27,21 @@ on:
         required: false
         type: string
         default: '--all'
+      concurrency:
+        description: 'Max parallel stack deployments (default: 1)'
+        required: false
+        type: number
+        default: 1
+      method:
+        description: 'Deploy method: change-set (safe, default) or direct (faster, no rollback)'
+        required: false
+        type: string
+        default: 'change-set'
+      hotswap:
+        description: 'Hotswap mode: off (default), fallback (try hotswap, fall back to CFN), or force (hotswap only)'
+        required: false
+        type: string
+        default: 'off'
       run-diff:
         description: 'Run cdk diff before deploy'
         required: false
@@ -101,10 +116,27 @@ jobs:
           done
           echo "flags=${CONTEXT_FLAGS}" >> "$GITHUB_OUTPUT"
 
+      # Synth once, reuse for diff + deploy (avoids double synthesis)
+      - name: CDK synth
+        run: npx cdk synth --quiet ${{ steps.context.outputs.flags }} -o cdk.deploy.out
+
       - name: CDK diff
         if: inputs.run-diff
-        run: npx cdk diff ${{ inputs.stacks }} ${{ steps.context.outputs.flags }}
+        run: npx cdk diff --app cdk.deploy.out || true
 
       - name: CDK deploy
         id: deploy
-        run: npx cdk deploy ${{ inputs.stacks }} --require-approval never ${{ steps.context.outputs.flags }}
+        shell: bash
+        run: |
+          HOTSWAP_FLAG=""
+          if [ "${{ inputs.hotswap }}" = "fallback" ]; then
+            HOTSWAP_FLAG="--hotswap-fallback"
+          elif [ "${{ inputs.hotswap }}" = "force" ]; then
+            HOTSWAP_FLAG="--hotswap"
+          fi
+
+          npx cdk deploy --app cdk.deploy.out ${{ inputs.stacks }} \
+            --require-approval never \
+            --concurrency ${{ inputs.concurrency }} \
+            --method=${{ inputs.method }} \
+            ${HOTSWAP_FLAG}
