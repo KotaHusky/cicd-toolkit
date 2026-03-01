@@ -117,6 +117,19 @@ new OidcBootstrapStack(app, 'OidcBootstrapStack', {
           ],
         }),
         new iam.PolicyStatement({
+          actions: ['ecr:GetAuthorizationToken'],
+          resources: ['*'],
+        }),
+        new iam.PolicyStatement({
+          actions: [
+            'ecr:CreateRepository', 'ecr:DescribeRepositories', 'ecr:PutLifecyclePolicy',
+            'ecr:BatchCheckLayerAvailability', 'ecr:InitiateLayerUpload',
+            'ecr:UploadLayerPart', 'ecr:CompleteLayerUpload', 'ecr:PutImage',
+            'ecr:BatchGetImage', 'ecr:GetDownloadUrlForLayer',
+          ],
+          resources: ['arn:aws:ecr:*:*:repository/kinky-connections-*'],
+        }),
+        new iam.PolicyStatement({
           actions: ['cloudfront:*'],
           resources: ['arn:aws:cloudfront::*:distribution/*'],
         }),
