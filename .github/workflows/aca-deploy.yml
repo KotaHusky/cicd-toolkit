@@ -64,6 +64,10 @@ on:
         description: 'Deployed app FQDN'
         value: ${{ jobs.deploy.outputs.fqdn }}
 
+concurrency:
+  group: aca-deploy-${{ inputs.resource-group }}-${{ inputs.container-app-name }}
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read

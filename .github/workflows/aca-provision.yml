@@ -31,6 +31,10 @@ on:
       AZURE_SUBSCRIPTION_ID:
         required: true
 
+concurrency:
+  group: aca-provision-${{ inputs.resource-group }}
+  cancel-in-progress: false
+
 jobs:
   provision:
     runs-on: ubuntu-latest

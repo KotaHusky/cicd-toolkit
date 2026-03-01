@@ -32,6 +32,10 @@ on:
       CLOUDFLARE_ZONE_ID:
         required: true
 
+concurrency:
+  group: cloudflare-dns-${{ inputs.record-name }}
+  cancel-in-progress: false
+
 jobs:
   dns:
     name: Update DNS

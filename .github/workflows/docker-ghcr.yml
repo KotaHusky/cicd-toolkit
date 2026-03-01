@@ -44,6 +44,10 @@ on:
         description: 'Image digest'
         value: ${{ jobs.build.outputs.digest }}
 
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write

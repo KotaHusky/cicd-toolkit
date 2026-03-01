@@ -29,6 +29,10 @@ on:
         type: string
         default: 'npm'
 
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   install:
     name: Install dependencies

@@ -9,6 +9,10 @@ on:
         type: string
         default: '24'
 
+concurrency:
+  group: commitlint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   commitlint:
     name: Lint Commits
