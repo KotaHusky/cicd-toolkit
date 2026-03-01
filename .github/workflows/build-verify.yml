@@ -72,22 +72,11 @@ jobs:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
 
-      - name: Restore Turbo cache
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: turbo-build-${{ runner.os }}-${{ github.sha }}
-          restore-keys: turbo-build-${{ runner.os }}-
+      - name: Turbo remote cache
+        uses: rharkor/caching-for-turbo@v2.2.1
 
       - name: Build
         run: npx turbo run build
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-output
-          path: .next
-          retention-days: 1
 
   test:
     name: Test
@@ -109,12 +98,8 @@ jobs:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
 
-      - name: Restore Turbo cache
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: turbo-test-${{ runner.os }}-${{ github.sha }}
-          restore-keys: turbo-test-${{ runner.os }}-
+      - name: Turbo remote cache
+        uses: rharkor/caching-for-turbo@v2.2.1
 
       - name: Test
         run: npx turbo run test
@@ -139,12 +124,8 @@ jobs:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
 
-      - name: Restore Turbo cache
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: turbo-lint-${{ runner.os }}-${{ github.sha }}
-          restore-keys: turbo-lint-${{ runner.os }}-
+      - name: Turbo remote cache
+        uses: rharkor/caching-for-turbo@v2.2.1
 
       - name: Lint
         run: npx turbo run lint
