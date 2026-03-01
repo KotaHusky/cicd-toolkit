@@ -4,17 +4,57 @@ on:
   workflow_call:
     inputs:
       aws-region:
+        description: AWS region
+        required: false
         type: string
         default: 'us-east-1'
       node-version:
+        description: Node.js version
+        required: false
         type: string
         default: '24'
-      working-directory:
+      pre-build-filter:
+        description: 'Turbo filter for packages to build before deploy (e.g. @my-org/shared)'
+        required: false
         type: string
-        default: '.'
+        default: ''
+      cdk-context:
+        description: 'CDK context flags (space-separated key=value pairs)'
+        required: true
+        type: string
+      stacks:
+        description: 'Stacks to deploy (default: --all)'
+        required: false
+        type: string
+        default: '--all'
+      run-diff:
+        description: 'Run cdk diff before deploy'
+        required: false
+        type: boolean
+        default: true
+      recover-stacks:
+        description: 'Recover stuck CloudFormation stacks before deploy'
+        required: false
+        type: boolean
+        default: true
+      stack-prefix:
+        description: 'Stack name prefix for recovery (required if recover-stacks is true)'
+        required: false
+        type: string
+        default: ''
+      checkout-ref:
+        description: 'Git ref to checkout (defaults to triggering ref)'
+        required: false
+        type: string
+        default: ''
     secrets:
       role-arn:
+        description: 'IAM role ARN for AWS authentication'
         required: true
+    outputs:
+      stacks-deployed:
+        description: 'Whether the deployment succeeded'
+        value: ${{ jobs.deploy.outputs.deployed }}
 
 concurrency:
   group: cdk-deploy-${{ github.workflow }}-${{ github.ref }}
@@ -26,26 +66,45 @@ permissions:
 
 jobs:
   deploy:
+    name: CDK Deploy
     runs-on: ubuntu-latest
+    outputs:
+      deployed: ${{ steps.deploy.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout-ref || github.ref }}
 
-      - uses: actions/setup-node@v4
+      - uses: KotaHusky/cicd-toolkit/actions/turbo-setup@v2
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'npm'
-          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
-
-      - run: npm ci
-        working-directory: ${{ inputs.working-directory }}
+          pre-build-filter: ${{ inputs.pre-build-filter }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.role-arn }}
           aws-region: ${{ inputs.aws-region }}
 
-      - run: npx cdk diff
-        working-directory: ${{ inputs.working-directory }}
+      - name: Recover stuck stacks
+        if: inputs.recover-stacks && inputs.stack-prefix != ''
+        uses: KotaHusky/cicd-toolkit/actions/cfn-recover@v2
+        with:
+          stack-prefix: ${{ inputs.stack-prefix }}
 
-      - run: npx cdk deploy --all --require-approval never
-        working-directory: ${{ inputs.working-directory }}
+      - name: Build CDK context flags
+        id: context
+        shell: bash
+        run: |
+          CONTEXT_FLAGS=""
+          for PAIR in ${{ inputs.cdk-context }}; do
+            CONTEXT_FLAGS="${CONTEXT_FLAGS} -c ${PAIR}"
+          done
+          echo "flags=${CONTEXT_FLAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: CDK diff
+        if: inputs.run-diff
+        run: npx cdk diff ${{ inputs.stacks }} ${{ steps.context.outputs.flags }}
+
+      - name: CDK deploy
+        id: deploy
+        run: npx cdk deploy ${{ inputs.stacks }} --require-approval never ${{ steps.context.outputs.flags }}

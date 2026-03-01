@@ -1,0 +1,81 @@
+name: ECR Mirror
+description: Mirror a container image to a private ECR repository with automatic repo creation and lifecycle policy
+
+inputs:
+  source-image:
+    description: 'Full source image URI (e.g. ghcr.io/owner/repo:tag)'
+    required: true
+  ecr-repo:
+    description: 'ECR repository name (defaults to lowercase GitHub repo name)'
+    required: false
+    default: ''
+  ecr-tag:
+    description: 'Tag for the ECR image'
+    required: false
+    default: 'latest'
+  aws-region:
+    description: 'AWS region for ECR'
+    required: true
+  untagged-expiry-days:
+    description: 'Days before untagged images expire'
+    required: false
+    default: '1'
+
+outputs:
+  ecr-uri:
+    description: 'Full ECR image URI (without tag)'
+    value: ${{ steps.setup.outputs.ecr-uri }}
+  ecr-image:
+    description: 'Full ECR image URI with tag'
+    value: ${{ steps.setup.outputs.ecr-uri }}:${{ inputs.ecr-tag }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up ECR repository
+      id: setup
+      shell: bash
+      run: |
+        ECR_REPO="${{ inputs.ecr-repo }}"
+        if [ -z "$ECR_REPO" ]; then
+          ECR_REPO=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f2 | tr '[:upper:]' '[:lower:]')
+        fi
+
+        AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com/${ECR_REPO}"
+
+        echo "ecr-repo=${ECR_REPO}" >> "$GITHUB_OUTPUT"
+        echo "ecr-uri=${ECR_URI}" >> "$GITHUB_OUTPUT"
+
+        aws ecr describe-repositories --repository-names "$ECR_REPO" 2>/dev/null || \
+        aws ecr create-repository \
+          --repository-name "$ECR_REPO" \
+          --image-tag-mutability MUTABLE
+
+        aws ecr put-lifecycle-policy \
+          --repository-name "$ECR_REPO" \
+          --lifecycle-policy-text "{
+            \"rules\": [{
+              \"rulePriority\": 1,
+              \"description\": \"Expire untagged images after ${{ inputs.untagged-expiry-days }} day(s)\",
+              \"selection\": {
+                \"tagStatus\": \"untagged\",
+                \"countType\": \"sinceImagePushed\",
+                \"countUnit\": \"days\",
+                \"countNumber\": ${{ inputs.untagged-expiry-days }}
+              },
+              \"action\": { \"type\": \"expire\" }
+            }]
+          }"
+
+    - name: Mirror image to ECR
+      shell: bash
+      run: |
+        ECR_URI="${{ steps.setup.outputs.ecr-uri }}"
+
+        aws ecr get-login-password --region ${{ inputs.aws-region }} | \
+          docker login --username AWS --password-stdin "${ECR_URI%/*}"
+
+        docker pull "${{ inputs.source-image }}"
+        docker tag "${{ inputs.source-image }}" "${ECR_URI}:${{ inputs.ecr-tag }}"
+        docker push "${ECR_URI}:${{ inputs.ecr-tag }}"

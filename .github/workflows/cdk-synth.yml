@@ -1,0 +1,47 @@
+name: CDK Synth
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version
+        required: false
+        type: string
+        default: '24'
+      pre-build-filter:
+        description: 'Turbo filter for packages to build before synth (e.g. @my-org/shared)'
+        required: false
+        type: string
+        default: ''
+      cdk-context:
+        description: 'CDK context flags (space-separated key=value pairs, e.g. env=dev projectName=MyApp)'
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: cdk-synth-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synth:
+    name: CDK Synth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: KotaHusky/cicd-toolkit/actions/turbo-setup@v2
+        with:
+          node-version: ${{ inputs.node-version }}
+          pre-build-filter: ${{ inputs.pre-build-filter }}
+
+      - name: CDK synth (dry run)
+        shell: bash
+        run: |
+          CONTEXT_FLAGS=""
+          if [ -n "${{ inputs.cdk-context }}" ]; then
+            for PAIR in ${{ inputs.cdk-context }}; do
+              CONTEXT_FLAGS="${CONTEXT_FLAGS} -c ${PAIR}"
+            done
+          fi
+          npx cdk synth --quiet ${CONTEXT_FLAGS}

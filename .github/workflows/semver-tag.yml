@@ -1,0 +1,54 @@
+name: Semantic Version Tag
+
+on:
+  workflow_call:
+    inputs:
+      default-bump:
+        description: 'Default bump type when no conventional commit bump detected (patch, minor, major, false)'
+        required: false
+        type: string
+        default: 'false'
+      release-branches:
+        description: 'Comma-separated list of branches that trigger releases'
+        required: false
+        type: string
+        default: 'main'
+    outputs:
+      new-version:
+        description: 'New semantic version (empty if no bump)'
+        value: ${{ jobs.tag.outputs.new-version }}
+      new-tag:
+        description: 'New git tag (empty if no bump)'
+        value: ${{ jobs.tag.outputs.new-tag }}
+      bumped:
+        description: 'Whether a version bump occurred'
+        value: ${{ jobs.tag.outputs.bumped }}
+      changelog:
+        description: 'Changelog since last tag'
+        value: ${{ jobs.tag.outputs.changelog }}
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      new-version: ${{ steps.tag.outputs.new_version }}
+      new-tag: ${{ steps.tag.outputs.new_tag }}
+      bumped: ${{ steps.tag.outputs.new_version != '' }}
+      changelog: ${{ steps.tag.outputs.changelog }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version & create tag
+        id: tag
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ github.token }}
+          default_bump: ${{ inputs.default-bump }}
+          release_branches: ${{ inputs.release-branches }}
+          fetch_all_tags: true

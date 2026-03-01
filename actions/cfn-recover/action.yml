@@ -1,0 +1,37 @@
+name: CloudFormation Stack Recovery
+description: Recover stuck CloudFormation stacks in ROLLBACK_COMPLETE or UPDATE_ROLLBACK_FAILED states
+
+inputs:
+  stack-prefix:
+    description: 'Stack name prefix to match (e.g. MyProject-)'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Recover stuck CloudFormation stacks
+      shell: bash
+      run: |
+        PREFIX="${{ inputs.stack-prefix }}"
+
+        for STACK in $(aws cloudformation list-stacks \
+          --stack-status-filter ROLLBACK_COMPLETE \
+          --query "StackSummaries[?starts_with(StackName,'${PREFIX}')].StackName" \
+          --output text); do
+          echo "Deleting empty rolled-back stack: ${STACK}"
+          aws cloudformation delete-stack --stack-name "$STACK"
+          aws cloudformation wait stack-delete-complete --stack-name "$STACK"
+        done
+
+        for STACK in $(aws cloudformation list-stacks \
+          --stack-status-filter UPDATE_ROLLBACK_FAILED \
+          --query "StackSummaries[?starts_with(StackName,'${PREFIX}')].StackName" \
+          --output text); do
+          FAILED=$(aws cloudformation describe-stack-events --stack-name "$STACK" \
+            --query "StackEvents[?ResourceStatus=='UPDATE_FAILED'].LogicalResourceId" \
+            --output text | tr '\t' '\n' | sort -u | xargs)
+          echo "Resuming rollback for ${STACK}, skipping: ${FAILED}"
+          aws cloudformation continue-update-rollback --stack-name "$STACK" \
+            --resources-to-skip $FAILED
+          aws cloudformation wait stack-rollback-complete --stack-name "$STACK"
+        done
