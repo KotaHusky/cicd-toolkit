@@ -114,6 +114,7 @@ new OidcBootstrapStack(app, 'OidcBootstrapStack', {
           resources: [
             'arn:aws:apprunner:*:*:service/KinkyConnections-*/*',
             'arn:aws:apprunner:*:*:service/KinkyConnectionsDev-*/*',
+            'arn:aws:apprunner:*:*:service/kinky-connections-*/*',
           ],
         }),
         new iam.PolicyStatement({
