@@ -1,0 +1,179 @@
+name: Reusable ECS Express Mode Deploy
+
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        description: 'ECS Express service name'
+        required: true
+        type: string
+      image:
+        description: 'Full container image URI (e.g. 123.dkr.ecr.us-east-1.amazonaws.com/app:v1.2.3)'
+        required: true
+        type: string
+      aws-region:
+        description: 'AWS region'
+        required: false
+        type: string
+        default: 'us-east-1'
+      cluster:
+        description: 'ECS cluster name (Express Mode creates one if omitted)'
+        required: false
+        type: string
+        default: ''
+      container-port:
+        description: 'Container port that receives traffic'
+        required: false
+        type: number
+        default: 80
+      cpu:
+        description: 'Fargate CPU units (e.g. 256, 512, 1024, 2048, 4096)'
+        required: false
+        type: string
+        default: '512'
+      memory:
+        description: 'Fargate memory in MiB (e.g. 1024, 2048, 4096)'
+        required: false
+        type: string
+        default: '1024'
+      environment-variables:
+        description: 'JSON array of env vars: [{"name":"K","value":"V"}]'
+        required: false
+        type: string
+        default: ''
+      secrets-json:
+        description: 'JSON array of secrets: [{"name":"K","valueFrom":"arn:..."}]'
+        required: false
+        type: string
+        default: ''
+      command:
+        description: 'Container command override as JSON array (e.g. ["node","server.js"])'
+        required: false
+        type: string
+        default: ''
+      health-check-path:
+        description: 'ALB health-check path'
+        required: false
+        type: string
+        default: '/'
+      min-task-count:
+        description: 'Minimum running tasks'
+        required: false
+        type: number
+        default: 1
+      max-task-count:
+        description: 'Maximum running tasks (auto-scaling ceiling)'
+        required: false
+        type: number
+        default: 3
+      auto-scaling-metric:
+        description: 'Auto-scaling metric (AVERAGE_CPU, AVERAGE_MEMORY, REQUEST_COUNT_PER_TASK)'
+        required: false
+        type: string
+        default: 'AVERAGE_CPU'
+      auto-scaling-target-value:
+        description: 'Auto-scaling target value'
+        required: false
+        type: number
+        default: 70
+      subnets:
+        description: 'Comma-separated subnet IDs (omit to use the default VPC)'
+        required: false
+        type: string
+        default: ''
+      security-groups:
+        description: 'Comma-separated security group IDs'
+        required: false
+        type: string
+        default: ''
+      task-role-arn:
+        description: 'IAM role ARN for the running container (app permissions)'
+        required: false
+        type: string
+        default: ''
+      tags:
+        description: 'JSON array of resource tags: [{"key":"K","value":"V"}]'
+        required: false
+        type: string
+        default: ''
+      checkout-ref:
+        description: 'Git ref to checkout (defaults to triggering ref)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      role-arn:
+        description: 'IAM role ARN for AWS authentication via OIDC'
+        required: true
+      execution-role-arn:
+        description: 'ECS task execution role ARN (pulls image, writes logs)'
+        required: true
+      infrastructure-role-arn:
+        description: 'ECS infrastructure role ARN (manages ALB/target groups/SGs)'
+        required: true
+    outputs:
+      service-arn:
+        description: 'ARN of the deployed Express service'
+        value: ${{ jobs.deploy.outputs.service-arn }}
+      endpoint:
+        description: 'Public endpoint URL (ALB DNS name)'
+        value: ${{ jobs.deploy.outputs.endpoint }}
+
+concurrency:
+  group: ecs-express-${{ inputs.service-name }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to ECS Express
+    runs-on: ubuntu-latest
+    outputs:
+      service-arn: ${{ steps.deploy.outputs.service-arn }}
+      endpoint: ${{ steps.deploy.outputs.endpoint }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout-ref || github.ref }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.role-arn }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Deploy to ECS Express Mode
+        id: deploy
+        uses: aws-actions/amazon-ecs-deploy-express-service@v1
+        with:
+          service-name: ${{ inputs.service-name }}
+          image: ${{ inputs.image }}
+          execution-role-arn: ${{ secrets.execution-role-arn }}
+          infrastructure-role-arn: ${{ secrets.infrastructure-role-arn }}
+          cluster: ${{ inputs.cluster }}
+          container-port: ${{ inputs.container-port }}
+          cpu: ${{ inputs.cpu }}
+          memory: ${{ inputs.memory }}
+          environment-variables: ${{ inputs.environment-variables }}
+          secrets: ${{ inputs.secrets-json }}
+          command: ${{ inputs.command }}
+          health-check-path: ${{ inputs.health-check-path }}
+          min-task-count: ${{ inputs.min-task-count }}
+          max-task-count: ${{ inputs.max-task-count }}
+          auto-scaling-metric: ${{ inputs.auto-scaling-metric }}
+          auto-scaling-target-value: ${{ inputs.auto-scaling-target-value }}
+          subnets: ${{ inputs.subnets }}
+          security-groups: ${{ inputs.security-groups }}
+          task-role-arn: ${{ inputs.task-role-arn }}
+          tags: ${{ inputs.tags }}
+
+      - name: Summarize deployment
+        run: |
+          echo "### ECS Express deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Service:** \`${{ inputs.service-name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Image:** \`${{ inputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Endpoint:** ${{ steps.deploy.outputs.endpoint }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **ARN:** \`${{ steps.deploy.outputs.service-arn }}\`" >> "$GITHUB_STEP_SUMMARY"
