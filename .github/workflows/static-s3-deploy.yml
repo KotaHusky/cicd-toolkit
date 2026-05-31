@@ -1,0 +1,185 @@
+name: Reusable Static Site Deploy (S3 + CloudFront)
+
+on:
+  workflow_call:
+    inputs:
+      bucket-name:
+        description: 'S3 bucket that hosts the static site'
+        required: true
+        type: string
+      distribution-id:
+        description: 'CloudFront distribution ID for cache invalidation'
+        required: true
+        type: string
+      aws-region:
+        description: 'AWS region for the S3 bucket'
+        required: false
+        type: string
+        default: 'us-east-1'
+      node-version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '24'
+      package-manager:
+        description: 'Package manager (npm or pnpm)'
+        required: false
+        type: string
+        default: 'npm'
+      build-command:
+        description: 'Command that produces the static output'
+        required: false
+        type: string
+        default: 'npm run build'
+      build-output-dir:
+        description: 'Directory of build output to upload (relative to repo root)'
+        required: false
+        type: string
+        default: 'out'
+      working-directory:
+        description: 'Directory to run the build from'
+        required: false
+        type: string
+        default: '.'
+      invalidation-paths:
+        description: 'Newline- or space-separated CloudFront paths to invalidate'
+        required: false
+        type: string
+        default: '/*'
+      sync-delete:
+        description: 'Pass --delete to s3 sync to remove orphaned objects'
+        required: false
+        type: boolean
+        default: true
+      cache-control-immutable:
+        description: 'Glob (relative to build-output-dir) whose objects get long-cache headers. Empty disables.'
+        required: false
+        type: string
+        default: '_next/static/*'
+      build-args:
+        description: 'Environment variables to set for the build step (KEY=VALUE per line)'
+        required: false
+        type: string
+        default: ''
+      checkout-ref:
+        description: 'Git ref to checkout (defaults to triggering ref)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      role-arn:
+        description: 'IAM role ARN for AWS authentication via OIDC'
+        required: true
+    outputs:
+      invalidation-id:
+        description: 'CloudFront invalidation ID'
+        value: ${{ jobs.deploy.outputs.invalidation-id }}
+      objects-uploaded:
+        description: 'Number of objects synced to S3 (parsed from aws cli output)'
+        value: ${{ jobs.deploy.outputs.objects-uploaded }}
+
+concurrency:
+  group: static-s3-${{ inputs.bucket-name }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy static site
+    runs-on: ubuntu-latest
+    outputs:
+      invalidation-id: ${{ steps.invalidate.outputs.invalidation-id }}
+      objects-uploaded: ${{ steps.sync.outputs.objects-uploaded }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout-ref || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
+            corepack enable
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
+
+      - name: Export build environment variables
+        if: inputs.build-args != ''
+        shell: bash
+        run: |
+          while IFS= read -r LINE; do
+            [ -z "$LINE" ] && continue
+            echo "$LINE" >> "$GITHUB_ENV"
+          done <<< "${{ inputs.build-args }}"
+
+      - name: Build
+        shell: bash
+        run: ${{ inputs.build-command }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.role-arn }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Sync build output to S3
+        id: sync
+        shell: bash
+        run: |
+          DELETE_FLAG=""
+          if [ "${{ inputs.sync-delete }}" = "true" ]; then
+            DELETE_FLAG="--delete"
+          fi
+
+          # Default short cache for everything (HTML, etc.)
+          aws s3 sync "${{ inputs.build-output-dir }}/" "s3://${{ inputs.bucket-name }}/" \
+            $DELETE_FLAG \
+            --cache-control "public, max-age=60, must-revalidate" \
+            | tee /tmp/sync.log
+
+          # Long-cache pass for fingerprinted/immutable assets (Next's _next/static, etc.)
+          if [ -n "${{ inputs.cache-control-immutable }}" ] \
+             && [ -d "${{ inputs.build-output-dir }}/$(dirname "${{ inputs.cache-control-immutable }}")" ]; then
+            aws s3 cp "${{ inputs.build-output-dir }}/$(dirname "${{ inputs.cache-control-immutable }}")" \
+              "s3://${{ inputs.bucket-name }}/$(dirname "${{ inputs.cache-control-immutable }}")" \
+              --recursive \
+              --cache-control "public, max-age=31536000, immutable"
+          fi
+
+          COUNT=$(grep -cE '^(upload|copy):' /tmp/sync.log || echo 0)
+          echo "objects-uploaded=${COUNT}" >> "$GITHUB_OUTPUT"
+
+      - name: Invalidate CloudFront cache
+        id: invalidate
+        shell: bash
+        run: |
+          # Convert newline- or space-separated input to a quoted, space-joined list
+          PATHS=$(echo "${{ inputs.invalidation-paths }}" | tr '\n' ' ')
+          INV_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "${{ inputs.distribution-id }}" \
+            --paths $PATHS \
+            --query 'Invalidation.Id' \
+            --output text)
+          echo "invalidation-id=${INV_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize deployment
+        shell: bash
+        run: |
+          echo "### Static site deploy" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Bucket:** \`s3://${{ inputs.bucket-name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Objects synced:** ${{ steps.sync.outputs.objects-uploaded }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Distribution:** \`${{ inputs.distribution-id }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Invalidation:** \`${{ steps.invalidate.outputs.invalidation-id }}\`" >> "$GITHUB_STEP_SUMMARY"

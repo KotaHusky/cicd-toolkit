@@ -1,0 +1,44 @@
+# Example: tag-driven release pipeline for a fully static site (e.g. Next.js
+# `output: 'export'`, Astro, SvelteKit static, Vite SPA, plain HTML).
+#
+# Flow on push to main:
+#   1. version  — bumps from conventional commits, creates vX.Y.Z tag
+#   2. deploy   — builds the site, syncs to S3, invalidates CloudFront
+#
+# A separate release-notes workflow fires on the v* tag push.
+#
+# Prerequisite: deploy infra once with the StaticSiteStack CDK construct from
+# this toolkit (lib/stacks/static-site-stack). It outputs the bucket name and
+# distribution id used below.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  version:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/semver-tag.yml@main
+    with:
+      default-bump: 'patch'
+
+  deploy:
+    needs: version
+    if: needs.version.outputs.bumped == 'true'
+    uses: KotaHusky/cicd-toolkit/.github/workflows/static-s3-deploy.yml@main
+    with:
+      bucket-name: my-site-bucket
+      distribution-id: E1234567ABCDEF
+      aws-region: us-east-1
+      # Next.js with `output: 'export'` → 'out'. Vite → 'dist'. Astro → 'dist'.
+      build-output-dir: out
+      # Any build-time env vars the static site needs baked in.
+      build-args: |
+        NEXT_PUBLIC_SITE_URL=https://my-site.example.com
+    secrets:
+      role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
