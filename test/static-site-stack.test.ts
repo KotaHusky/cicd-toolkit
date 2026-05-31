@@ -81,6 +81,42 @@ describe('StaticSiteStack', () => {
     });
   });
 
+  test('default-domain mode: omits ACM, Route53, and distribution aliases', () => {
+    const app = new cdk.App();
+    const stack = new StaticSiteStack(app, 'NoDomain', { env: ENV });
+    const template = Template.fromStack(stack);
+    template.resourceCountIs('AWS::CertificateManager::Certificate', 0);
+    template.resourceCountIs('AWS::Route53::RecordSet', 0);
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        Aliases: Match.absent(),
+      }),
+    });
+    template.resourceCountIs('AWS::S3::Bucket', 1);
+    template.resourceCountIs('AWS::CloudFront::Distribution', 1);
+  });
+
+  test('default-domain mode: SiteUrl output points at distribution domain', () => {
+    const app = new cdk.App();
+    const stack = new StaticSiteStack(app, 'NoDomain', { env: ENV });
+    const template = Template.fromStack(stack);
+    const outputs = template.findOutputs('SiteUrl');
+    const siteUrl = Object.values(outputs)[0] as { Value: unknown };
+    // Value is a Fn::Join referencing DistributionDomainName when no custom domain.
+    expect(JSON.stringify(siteUrl.Value)).toContain('DomainName');
+  });
+
+  test('throws when domainName is set without hostedZoneName', () => {
+    const app = new cdk.App();
+    expect(() => {
+      new StaticSiteStack(app, 'Bad', {
+        env: ENV,
+        domainName: 'site.example.com',
+        // hostedZoneName omitted on purpose
+      });
+    }).toThrow(/hostedZoneName is required/);
+  });
+
   test('exports bucket name and distribution id as CfnOutputs', () => {
     const template = Template.fromStack(makeStack());
     const outputs = template.findOutputs('*');

@@ -205,9 +205,11 @@ This creates an IAM OIDC Provider for `token.actions.githubusercontent.com` and 
 
 Reusable, project-agnostic constructs in [`lib/`](lib/). Import them into your own CDK app.
 
-### `StaticSiteStack` (S3 + CloudFront + ACM + Route 53)
+### `StaticSiteStack` (S3 + CloudFront, optional ACM + Route 53)
 
-Private S3 bucket + CloudFront distribution with Origin Access Control + ACM cert (us-east-1) + optional Route 53 A/AAAA alias. Outputs the bucket name and distribution ID for [`static-s3-deploy.yml`](#static-site-deploy-s3--cloudfront).
+Private S3 bucket + CloudFront distribution with Origin Access Control. Optionally provisions an ACM cert (us-east-1) and a Route 53 A/AAAA alias when you want a custom domain. Outputs the bucket name and distribution ID for [`static-s3-deploy.yml`](#static-site-deploy-s3--cloudfront).
+
+**Custom-domain mode** — pass `domainName` + `hostedZoneName`:
 
 ```ts
 import { StaticSiteStack } from 'cicd-toolkit/lib/stacks/static-site-stack';
@@ -216,8 +218,17 @@ new StaticSiteStack(app, 'MySite', {
   env: { account: '123456789012', region: 'us-east-1' },
   domainName: 'site.example.com',
   hostedZoneName: 'example.com',
-  spaFallback: false,              // true → 403/404 → /index.html for SPAs
+  spaFallback: false,                  // true → 403/404 → /index.html for SPAs
   additionalAliases: ['www.example.com'],
+});
+```
+
+**Default-CloudFront-domain mode** — omit `domainName` entirely. No ACM cert, no DNS records; the site is reachable via the auto-generated `dXXXXX.cloudfront.net`. Useful for kiosk apps and internal tools where you *don't* want a memorable URL ("security by obscurity"):
+
+```ts
+new StaticSiteStack(app, 'MySite', {
+  env: { account: '123456789012', region: 'us-east-1' },
+  // no domainName — distribution served from its default *.cloudfront.net only
 });
 ```
 

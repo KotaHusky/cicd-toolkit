@@ -8,13 +8,16 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 
 export interface StaticSiteStackProps extends cdk.StackProps {
-  /** Fully qualified domain name to serve from (e.g. 'kiosk.example.org'). */
-  domainName: string;
-  /** Hosted zone the domain lives in. The certificate uses DNS validation
-   *  against this zone, and an A/AAAA alias is created if `createDnsRecord`
-   *  is true (default). */
-  hostedZoneName: string;
-  /** Create the A/AAAA alias record. Set false if DNS is managed elsewhere. */
+  /** Custom domain (e.g. 'kiosk.example.org'). Omit to use the auto-generated
+   *  CloudFront domain (e.g. d123abc.cloudfront.net) only — no ACM cert and
+   *  no Route 53 record are created. Useful when you don't want a memorable
+   *  URL (kiosk apps, internal tools, "security by obscurity"). */
+  domainName?: string;
+  /** Hosted zone that owns `domainName`. Required when `domainName` is set
+   *  so the ACM cert can DNS-validate and the alias record can be created. */
+  hostedZoneName?: string;
+  /** Create the A/AAAA alias record. Defaults to true when `domainName` is
+   *  set; ignored otherwise. */
   createDnsRecord?: boolean;
   /** Treat the site as a single-page app: 403/404 from S3 return /index.html
    *  with status 200. Defaults to false (true static site). */
@@ -23,13 +26,22 @@ export interface StaticSiteStackProps extends cdk.StackProps {
   defaultRootObject?: string;
   /** CloudFront price class. Defaults to PRICE_CLASS_100 (NA + EU). */
   priceClass?: cloudfront.PriceClass;
-  /** Optional additional aliases (e.g. ['www.example.org']). */
+  /** Optional additional aliases (e.g. ['www.example.org']). Ignored when
+   *  `domainName` is unset. */
   additionalAliases?: string[];
 }
 
 /**
  * Generic static-site stack: private S3 bucket + CloudFront distribution with
- * Origin Access Control + ACM certificate (us-east-1) + optional Route 53 alias.
+ * Origin Access Control + optional ACM certificate (us-east-1) + optional
+ * Route 53 alias.
+ *
+ * Two modes:
+ *  1. Custom domain — pass `domainName` + `hostedZoneName`. Provisions ACM
+ *     with DNS validation, sets the distribution alias, creates A/AAAA.
+ *  2. Default CloudFront domain only — omit `domainName`. The distribution
+ *     is reachable via `dXXXXX.cloudfront.net` with CloudFront's default
+ *     certificate. No DNS or ACM resources are created.
  *
  * Intentionally project-agnostic. Tagging and per-project conventions are the
  * caller's responsibility — pair with `applyTags()` from
@@ -38,17 +50,17 @@ export interface StaticSiteStackProps extends cdk.StackProps {
 export class StaticSiteStack extends cdk.Stack {
   public readonly bucket: s3.Bucket;
   public readonly distribution: cloudfront.Distribution;
-  public readonly certificate: acm.Certificate;
-  public readonly hostedZone: route53.IHostedZone;
+  /** Only set when a custom domain is configured. */
+  public readonly certificate?: acm.Certificate;
+  /** Only set when a custom domain is configured. */
+  public readonly hostedZone?: route53.IHostedZone;
 
-  constructor(scope: Construct, id: string, props: StaticSiteStackProps) {
+  constructor(scope: Construct, id: string, props: StaticSiteStackProps = {}) {
     super(scope, id, props);
 
-    const aliases = [props.domainName, ...(props.additionalAliases ?? [])];
-
-    this.hostedZone = route53.HostedZone.fromLookup(this, 'HostedZone', {
-      domainName: props.hostedZoneName,
-    });
+    if (props.domainName && !props.hostedZoneName) {
+      throw new Error('StaticSiteStack: hostedZoneName is required when domainName is set.');
+    }
 
     this.bucket = new s3.Bucket(this, 'SiteBucket', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -59,11 +71,18 @@ export class StaticSiteStack extends cdk.Stack {
       objectOwnership: s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,
     });
 
-    this.certificate = new acm.Certificate(this, 'SiteCertificate', {
-      domainName: props.domainName,
-      subjectAlternativeNames: props.additionalAliases,
-      validation: acm.CertificateValidation.fromDns(this.hostedZone),
-    });
+    let aliases: string[] | undefined;
+    if (props.domainName) {
+      aliases = [props.domainName, ...(props.additionalAliases ?? [])];
+      this.hostedZone = route53.HostedZone.fromLookup(this, 'HostedZone', {
+        domainName: props.hostedZoneName!,
+      });
+      this.certificate = new acm.Certificate(this, 'SiteCertificate', {
+        domainName: props.domainName,
+        subjectAlternativeNames: props.additionalAliases,
+        validation: acm.CertificateValidation.fromDns(this.hostedZone),
+      });
+    }
 
     const defaultBehavior: cloudfront.BehaviorOptions = {
       origin: origins.S3BucketOrigin.withOriginAccessControl(this.bucket),
@@ -91,17 +110,17 @@ export class StaticSiteStack extends cdk.Stack {
       errorResponses,
     });
 
-    if (props.createDnsRecord !== false) {
+    if (props.domainName && props.createDnsRecord !== false) {
       const target = route53.RecordTarget.fromAlias(
         new route53Targets.CloudFrontTarget(this.distribution),
       );
       new route53.ARecord(this, 'AliasA', {
-        zone: this.hostedZone,
+        zone: this.hostedZone!,
         recordName: props.domainName,
         target,
       });
       new route53.AaaaRecord(this, 'AliasAAAA', {
-        zone: this.hostedZone,
+        zone: this.hostedZone!,
         recordName: props.domainName,
         target,
       });
@@ -117,10 +136,12 @@ export class StaticSiteStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, 'DistributionDomain', {
       value: this.distribution.distributionDomainName,
-      description: 'CloudFront distribution domain (use for DNS if not creating record here)',
+      description: 'CloudFront distribution domain. Hit it directly when no custom domain is set.',
     });
     new cdk.CfnOutput(this, 'SiteUrl', {
-      value: `https://${props.domainName}`,
+      value: props.domainName
+        ? `https://${props.domainName}`
+        : `https://${this.distribution.distributionDomainName}`,
     });
   }
 }
