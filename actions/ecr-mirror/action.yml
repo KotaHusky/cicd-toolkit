@@ -68,14 +68,20 @@ runs:
             }]
           }"
 
-    - name: Mirror image to ECR
+    - name: Mirror image to ECR (crane, registry-to-registry)
       shell: bash
       run: |
         ECR_URI="${{ steps.setup.outputs.ecr-uri }}"
+        REGISTRY="${ECR_URI%/*}"
 
-        aws ecr get-login-password --region ${{ inputs.aws-region }} | \
-          docker login --username AWS --password-stdin "${ECR_URI%/*}"
+        # Install crane (streams layers registry-to-registry; no local pull/push).
+        CRANE_VERSION="v0.20.3"
+        curl -fsSL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+          | tar -xz -C /usr/local/bin crane
 
-        docker pull "${{ inputs.source-image }}"
-        docker tag "${{ inputs.source-image }}" "${ECR_URI}:${{ inputs.ecr-tag }}"
-        docker push "${ECR_URI}:${{ inputs.ecr-tag }}"
+        # Auth to ECR (source ghcr image is public; no ghcr login needed).
+        aws ecr get-login-password --region ${{ inputs.aws-region }} \
+          | crane auth login "$REGISTRY" --username AWS --password-stdin
+
+        # Copy only the layers ECR is missing — much faster than docker pull+push.
+        crane copy "${{ inputs.source-image }}" "${ECR_URI}:${{ inputs.ecr-tag }}"
