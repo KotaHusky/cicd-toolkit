@@ -146,22 +146,6 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-  changes:
-    needs: [config]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      infra: ${{ steps.f.outputs.infra }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: f
-        with:
-          filters: |
-            infra:
-              - 'infra/**'
-              - '.github/workflows/**'
-
   image:
     needs: [config]
     uses: KotaHusky/cicd-toolkit/.github/workflows/docker-ghcr.yml@main
@@ -218,13 +202,11 @@ jobs:
       infrastructure-role-arn: ${{ secrets.infrastructure-role-arn }}
 
   edge:
-    needs: [config, service, changes]
-    # Only run the slow CloudFront edge when infra/ changed, or on a manual
-    # dispatch (first-time setup). Routine code pushes (prod) and PR updates
-    # (dev) skip it entirely -> much faster deploys.
-    if: >-
-      always() && needs.service.result == 'success' &&
-      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.infra == 'true')
+    needs: [config, service]
+    # Always run after a successful service deploy. CDK no-ops the CloudFront
+    # stack quickly when nothing changed, so this is cheap; a path-filter "skip"
+    # was unreliable on squash-merge pushes (orphaned event.before) and silently
+    # skipped real infra changes.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
