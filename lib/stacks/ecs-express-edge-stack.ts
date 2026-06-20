@@ -2,8 +2,6 @@ import * as cdk from 'aws-cdk-lib';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
-import * as route53 from 'aws-cdk-lib/aws-route53';
-import * as route53Targets from 'aws-cdk-lib/aws-route53-targets';
 import { Construct } from 'constructs';
 import {
   EcsExpressObservability,
@@ -13,47 +11,44 @@ import {
 
 export interface EcsExpressEdgeStackProps extends cdk.StackProps {
   /**
-   * Public DNS name of the Application Load Balancer that ECS Express Mode
-   * provisions — the `endpoint` output of cicd-toolkit's `ecs-express-deploy.yml`
-   * (e.g. 'homepage-alb-1234567890.us-east-1.elb.amazonaws.com'). This is the
-   * CloudFront origin. The ALB is stable across service redeploys, so it only
-   * changes if the ECS Express service is destroyed and recreated.
+   * The ECS Express service endpoint — the `endpoint` output of
+   * `ecs-express-deploy.yml` (e.g. `ho-<hash>.ecs.us-east-1.on.aws`). This is
+   * the CloudFront origin. ECS Express serves it over **HTTPS** via the managed
+   * gateway, so the origin protocol defaults to HTTPS_ONLY.
    */
   albDnsName: string;
-  /** Custom domain (e.g. 'kota.dog'). Omit to use the auto-generated CloudFront
-   *  domain only — no ACM cert and no Route 53 record are created (handy for a
-   *  first smoke test before DNS is ready). */
+  /**
+   * Custom domain (e.g. `kota.dog`). DNS is on **Cloudflare** — this stack
+   * never touches Route 53. When set, CloudFront serves the alias with an ACM
+   * cert; you point Cloudflare DNS at the distribution (see below). Omit to use
+   * the default `dXXXX.cloudfront.net` domain (e.g. for smoke tests).
+   */
   domainName?: string;
-  /** Hosted zone that owns `domainName`. Required when `domainName` is set so
-   *  the ACM cert can DNS-validate and the alias record can be created. For a
-   *  subdomain (afterdark.kota.dog) this is still the parent zone (kota.dog). */
-  hostedZoneName?: string;
-  /** Create the A/AAAA alias record. Defaults to true when `domainName` is set;
-   *  ignored otherwise. Set false if you manage the record outside CDK. */
-  createDnsRecord?: boolean;
-  /** Additional aliases served by the same distribution (e.g. ['www.kota.dog']).
-   *  Each must resolve within `hostedZoneName`. Ignored when `domainName` is
-   *  unset. */
+  /**
+   * ARN of a **pre-validated ACM certificate in us-east-1** covering
+   * `domainName`. STRONGLY recommended for CI: without it, the stack requests a
+   * new cert with manual DNS validation and `cdk deploy` BLOCKS until the
+   * validation CNAME exists in Cloudflare. With it, deploys never block.
+   */
+  certificateArn?: string;
+  /** Additional aliases on the same distribution (e.g. `['www.kota.dog']`). */
   additionalAliases?: string[];
   /** CloudFront price class. Defaults to PRICE_CLASS_100 (NA + EU). */
   priceClass?: cloudfront.PriceClass;
-  /** Origin protocol CloudFront uses to reach the ALB. ECS Express stands up a
-   *  plain-HTTP ALB by default, so this defaults to HTTP_ONLY. Switch to
-   *  HTTPS_ONLY only if you've attached a cert to the ALB's 443 listener. */
+  /** Origin protocol CloudFront uses to reach the ECS Express endpoint.
+   *  Defaults to HTTPS_ONLY (the `.on.aws` gateway is HTTPS-only). */
   originProtocolPolicy?: cloudfront.OriginProtocolPolicy;
 
   // --- Observability (opt-in) ----------------------------------------------
   /** Friendly service name for dashboard/alarm naming. Defaults to
-   *  `domainName`, else the ALB DNS name. */
+   *  `domainName`, else the endpoint. */
   serviceName?: string;
-  /** Opt-in observability (dashboard, alarms, access logs, log retention,
-   *  X-Ray flag) with dev/prod tiers. OMIT to create nothing — the dashboard is
-   *  no longer on by default. */
+  /** Opt-in observability (dashboard, alarms, access logs, retention, X-Ray
+   *  flag) with dev/prod tiers. OMIT to create nothing. */
   observability?: ObservabilityProps;
   /** Override the dashboard name. Defaults to `${serviceName}-ecs-express`. */
   dashboardName?: string;
-  /** ALB CloudWatch dimension `app/<lb-name>/<lb-id>` (tail of the ALB ARN).
-   *  Enables ALB widgets + alarms. */
+  /** ALB dimension `app/<lb-name>/<lb-id>` — enables ALB widgets + alarms. */
   loadBalancerFullName?: string;
   /** Target group dimension `targetgroup/<name>/<id>` for host-health. */
   targetGroupFullName?: string;
@@ -64,35 +59,37 @@ export interface EcsExpressEdgeStackProps extends cdk.StackProps {
 }
 
 /**
- * TLS + CDN edge for an app deployed via ECS Express Mode.
+ * TLS + CDN edge for an app deployed via ECS Express Mode, with **Cloudflare**
+ * for DNS (Route 53 is intentionally not used anywhere in this construct).
  *
- * ECS Express only exposes a plain-HTTP ALB, so this stack puts CloudFront in
- * front: terminates TLS (ACM, us-east-1), serves the custom domain, and
- * edge-caches Next.js immutable assets while leaving SSR responses uncached.
+ *   viewer --HTTPS--> CloudFront --HTTPS--> ECS Express (.on.aws) --> Next.js
  *
- *   viewer --HTTPS--> CloudFront --HTTP--> ALB --> Fargate (Next.js)
+ * CloudFront terminates TLS for the custom domain (ACM, us-east-1), edge-caches
+ * Next.js immutable assets, and leaves SSR responses uncached. No off-the-shelf
+ * construct covers CloudFront -> ECS Express, so this is a small L3 of L2s.
  *
- * There is no off-the-shelf AWS/community construct for CloudFront -> ALB ->
- * ECS Express, so this is a small purpose-built L3 composed of L2s. It mirrors
- * `StaticSiteStack` but swaps the S3 origin for the ECS Express ALB.
+ * Modes:
+ *  1. Custom domain on Cloudflare — pass `domainName` (+ `certificateArn` for
+ *     CI). CloudFront gets the alias + cert; you add the Cloudflare records.
+ *  2. Default CloudFront domain — omit `domainName`. Reachable at
+ *     `dXXXX.cloudfront.net`; no ACM resources.
  *
- * Two modes (same as StaticSiteStack):
- *  1. Custom domain — pass `domainName` + `hostedZoneName`. Provisions ACM with
- *     DNS validation, sets the distribution alias, creates A/AAAA records.
- *  2. Default CloudFront domain only — omit `domainName`. Reachable via
- *     dXXXXX.cloudfront.net; no ACM or Route 53 resources.
+ * ### Cloudflare DNS (via the Cloudflare MCP server)
+ * After deploy, read the `DistributionDomain` output and, using the Cloudflare
+ * MCP server, create these records in the `kota.dog` zone:
+ *   1. CNAME `<domainName>` -> `<DistributionDomain>` (DNS-only / grey-cloud;
+ *      do NOT proxy — CloudFront already fronts it).
+ *   2. If the stack minted the cert (no `certificateArn`), also add the ACM
+ *      validation CNAME ACM shows as "pending" (name+value from the ACM cert),
+ *      then re-run the deploy. Leave it in place for auto-renewal.
+ * Apex domains: enable Cloudflare CNAME flattening for the root record.
  *
- * Deploy AFTER the app's first ECS Express deploy (it needs the ALB DNS name).
- *
- * IMPORTANT: CloudFront requires its ACM certificate in us-east-1. Deploy this
- * stack in us-east-1 (the toolkit default) so the in-stack cert is valid.
+ * IMPORTANT: the ACM cert must be in us-east-1 — deploy this stack there.
  */
 export class EcsExpressEdgeStack extends cdk.Stack {
   public readonly distribution: cloudfront.Distribution;
   /** Only set when a custom domain is configured. */
-  public readonly certificate?: acm.Certificate;
-  /** Only set when a custom domain is configured. */
-  public readonly hostedZone?: route53.IHostedZone;
+  public readonly certificate?: acm.ICertificate;
   /** Only set when observability is enabled. */
   public readonly observability?: EcsExpressObservability;
 
@@ -100,35 +97,32 @@ export class EcsExpressEdgeStack extends cdk.Stack {
     super(scope, id, props);
 
     if (!props.albDnsName) {
-      throw new Error('EcsExpressEdgeStack: albDnsName is required (the ECS Express ALB endpoint).');
-    }
-    if (props.domainName && !props.hostedZoneName) {
-      throw new Error('EcsExpressEdgeStack: hostedZoneName is required when domainName is set.');
+      throw new Error('EcsExpressEdgeStack: albDnsName is required (the ECS Express endpoint).');
     }
 
     let aliases: string[] | undefined;
     if (props.domainName) {
       aliases = [props.domainName, ...(props.additionalAliases ?? [])];
-      this.hostedZone = route53.HostedZone.fromLookup(this, 'HostedZone', {
-        domainName: props.hostedZoneName!,
-      });
-      this.certificate = new acm.Certificate(this, 'EdgeCertificate', {
-        domainName: props.domainName,
-        subjectAlternativeNames: props.additionalAliases,
-        validation: acm.CertificateValidation.fromDns(this.hostedZone),
-      });
+      this.certificate = props.certificateArn
+        ? acm.Certificate.fromCertificateArn(this, 'EdgeCertificate', props.certificateArn)
+        : new acm.Certificate(this, 'EdgeCertificate', {
+            domainName: props.domainName,
+            subjectAlternativeNames: props.additionalAliases,
+            // External DNS (Cloudflare): manual validation. Deploy blocks until
+            // the validation CNAME is added in Cloudflare (use the MCP server).
+            validation: acm.CertificateValidation.fromDns(),
+          });
     }
 
     const obs = props.observability ? resolveObservability(props.observability) : undefined;
 
     const origin = new origins.HttpOrigin(props.albDnsName, {
-      protocolPolicy: props.originProtocolPolicy ?? cloudfront.OriginProtocolPolicy.HTTP_ONLY,
-      httpPort: 80,
+      protocolPolicy: props.originProtocolPolicy ?? cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
       httpsPort: 443,
     });
 
     // SSR responses are dynamic: don't cache, forward everything (minus Host so
-    // the ALB/Next sees real query strings, cookies and headers).
+    // the gateway routes to the right service by its origin hostname).
     const ssrBehavior: cloudfront.BehaviorOptions = {
       origin,
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -158,28 +152,11 @@ export class EcsExpressEdgeStack extends cdk.Stack {
       priceClass: props.priceClass ?? cloudfront.PriceClass.PRICE_CLASS_100,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
-      // CloudFront standard access logs — CDK provisions the log bucket. Since
-      // CloudFront fronts all traffic, these are the meaningful access logs
-      // (ALB-level logs would only add origin-fetch detail).
+      // CloudFront standard access logs (CDK provisions the bucket). CloudFront
+      // fronts all traffic, so these are the meaningful access logs.
       enableLogging: obs?.accessLogs ?? false,
       comment: `ECS Express edge for ${props.domainName ?? props.albDnsName}`,
     });
-
-    if (props.domainName && props.createDnsRecord !== false) {
-      const target = route53.RecordTarget.fromAlias(
-        new route53Targets.CloudFrontTarget(this.distribution),
-      );
-      new route53.ARecord(this, 'AliasA', {
-        zone: this.hostedZone!,
-        recordName: props.domainName,
-        target,
-      });
-      new route53.AaaaRecord(this, 'AliasAAAA', {
-        zone: this.hostedZone!,
-        recordName: props.domainName,
-        target,
-      });
-    }
 
     const serviceName = props.serviceName ?? props.domainName ?? props.albDnsName;
     if (obs) {
@@ -202,7 +179,7 @@ export class EcsExpressEdgeStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'DistributionDomain', {
       value: this.distribution.distributionDomainName,
       description: props.domainName
-        ? 'CloudFront distribution domain (alias record points here)'
+        ? `Cloudflare: CNAME ${props.domainName} -> this value (DNS-only / grey-cloud)`
         : 'CloudFront distribution domain. Hit it directly when no custom domain is set.',
     });
     new cdk.CfnOutput(this, 'SiteUrl', {

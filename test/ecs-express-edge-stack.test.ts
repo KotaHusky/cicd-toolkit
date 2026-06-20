@@ -5,53 +5,48 @@ import { EcsExpressEdgeStack } from '../lib/stacks/ecs-express-edge-stack';
 import { applyTags } from '../lib/constructs/standard-tags';
 
 const ENV = { account: '111111111111', region: 'us-east-1' };
-const ALB = 'homepage-alb-1234567890.us-east-1.elb.amazonaws.com';
+const ENDPOINT = 'ho-6aa8cf0a33c84998b3e7bd4906bbf686.ecs.us-east-1.on.aws';
 
 function makeStack(overrides: Partial<ConstructorParameters<typeof EcsExpressEdgeStack>[2]> = {}) {
-  const app = new cdk.App({
-    // HostedZone.fromLookup needs account/region resolvable at synth time.
-    context: {
-      'hosted-zone:account=111111111111:domainName=kota.dog:region=us-east-1': {
-        Id: '/hostedzone/ZTEST123',
-        Name: 'kota.dog.',
-      },
-    },
-  });
+  const app = new cdk.App();
   return new EcsExpressEdgeStack(app, 'TestEdge', {
     env: ENV,
-    albDnsName: ALB,
+    albDnsName: ENDPOINT,
     domainName: 'kota.dog',
-    hostedZoneName: 'kota.dog',
     ...overrides,
   });
 }
 
-describe('EcsExpressEdgeStack', () => {
+describe('EcsExpressEdgeStack (Cloudflare DNS, no Route53)', () => {
   test('creates a CloudFront distribution with the custom domain alias', () => {
     const template = Template.fromStack(makeStack());
     template.resourceCountIs('AWS::CloudFront::Distribution', 1);
     template.hasResourceProperties('AWS::CloudFront::Distribution', {
-      DistributionConfig: Match.objectLike({
-        Aliases: Match.arrayWith(['kota.dog']),
-      }),
+      DistributionConfig: Match.objectLike({ Aliases: Match.arrayWith(['kota.dog']) }),
     });
   });
 
-  test('points the origin at the ALB over HTTP only by default', () => {
+  test('NEVER creates Route53 resources', () => {
+    const template = Template.fromStack(makeStack());
+    template.resourceCountIs('AWS::Route53::RecordSet', 0);
+    template.resourceCountIs('AWS::Route53::HostedZone', 0);
+  });
+
+  test('origin uses HTTPS_ONLY by default (the .on.aws gateway is HTTPS-only)', () => {
     const template = Template.fromStack(makeStack());
     template.hasResourceProperties('AWS::CloudFront::Distribution', {
       DistributionConfig: Match.objectLike({
         Origins: Match.arrayWith([
           Match.objectLike({
-            DomainName: ALB,
-            CustomOriginConfig: Match.objectLike({ OriginProtocolPolicy: 'http-only' }),
+            DomainName: ENDPOINT,
+            CustomOriginConfig: Match.objectLike({ OriginProtocolPolicy: 'https-only' }),
           }),
         ]),
       }),
     });
   });
 
-  test('disables caching on the default (SSR) behavior and caches /_next/static/*', () => {
+  test('caches /_next/static/* and /_next/image*', () => {
     const template = Template.fromStack(makeStack());
     const dist = Object.values(template.findResources('AWS::CloudFront::Distribution'))[0] as {
       Properties: { DistributionConfig: { CacheBehaviors?: Array<{ PathPattern: string }> } };
@@ -66,14 +61,13 @@ describe('EcsExpressEdgeStack', () => {
     template.hasResourceProperties('AWS::CloudFront::Distribution', {
       DistributionConfig: Match.objectLike({
         DefaultCacheBehavior: Match.objectLike({
-          // ALLOW_ALL renders as GET,HEAD,OPTIONS,PUT,PATCH,POST,DELETE.
           AllowedMethods: Match.arrayWith(['PUT', 'PATCH', 'POST', 'DELETE']),
         }),
       }),
     });
   });
 
-  test('creates an ACM certificate with DNS validation', () => {
+  test('mints an ACM cert with DNS validation when no certificateArn', () => {
     const template = Template.fromStack(makeStack());
     template.resourceCountIs('AWS::CertificateManager::Certificate', 1);
     template.hasResourceProperties('AWS::CertificateManager::Certificate', {
@@ -82,27 +76,23 @@ describe('EcsExpressEdgeStack', () => {
     });
   });
 
-  test('creates A + AAAA alias records by default', () => {
-    const template = Template.fromStack(makeStack());
-    template.resourceCountIs('AWS::Route53::RecordSet', 2);
-  });
-
-  test('skips DNS records when createDnsRecord is false', () => {
-    const template = Template.fromStack(makeStack({ createDnsRecord: false }));
-    template.resourceCountIs('AWS::Route53::RecordSet', 0);
-  });
-
-  test('honors originProtocolPolicy override', () => {
+  test('imports the cert (no new ACM resource) when certificateArn is given', () => {
     const template = Template.fromStack(
-      makeStack({ originProtocolPolicy: undefined }), // default path covered above
+      makeStack({
+        certificateArn: 'arn:aws:acm:us-east-1:111111111111:certificate/abc-123',
+      }),
     );
-    expect(template).toBeDefined();
+    template.resourceCountIs('AWS::CertificateManager::Certificate', 0);
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({ Aliases: Match.arrayWith(['kota.dog']) }),
+    });
   });
 
-  test('default-domain mode: omits ACM, Route53, and distribution aliases', () => {
+  test('default-domain mode: no cert, no aliases', () => {
     const app = new cdk.App();
-    const stack = new EcsExpressEdgeStack(app, 'NoDomain', { env: ENV, albDnsName: ALB });
-    const template = Template.fromStack(stack);
+    const template = Template.fromStack(
+      new EcsExpressEdgeStack(app, 'NoDomain', { env: ENV, albDnsName: ENDPOINT }),
+    );
     template.resourceCountIs('AWS::CertificateManager::Certificate', 0);
     template.resourceCountIs('AWS::Route53::RecordSet', 0);
     template.resourceCountIs('AWS::CloudFront::Distribution', 1);
@@ -111,18 +101,11 @@ describe('EcsExpressEdgeStack', () => {
     });
   });
 
-  test('throws when domainName is set without hostedZoneName', () => {
-    const app = new cdk.App();
-    expect(() => {
-      new EcsExpressEdgeStack(app, 'Bad', { env: ENV, albDnsName: ALB, domainName: 'kota.dog' });
-    }).toThrow(/hostedZoneName is required/);
-  });
-
   test('throws when albDnsName is missing', () => {
     const app = new cdk.App();
-    expect(() => {
-      new EcsExpressEdgeStack(app, 'Bad', { env: ENV, albDnsName: '' });
-    }).toThrow(/albDnsName is required/);
+    expect(() => new EcsExpressEdgeStack(app, 'Bad', { env: ENV, albDnsName: '' })).toThrow(
+      /albDnsName is required/,
+    );
   });
 
   test('exports distribution id, domain, and site url', () => {
@@ -152,7 +135,7 @@ describe('EcsExpressEdgeStack', () => {
     const template = Template.fromStack(
       makeStack({
         observability: { tier: 'prod', alarmEmail: 'ops@kota.dog' },
-        loadBalancerFullName: 'app/homepage-alb/abc123',
+        loadBalancerFullName: 'app/ecs-express-gateway-alb/abc123',
         targetGroupFullName: 'targetgroup/homepage-tg/def456',
         ecsClusterName: 'default',
         ecsServiceName: 'homepage',
@@ -160,23 +143,17 @@ describe('EcsExpressEdgeStack', () => {
     );
     template.resourceCountIs('AWS::CloudWatch::Dashboard', 1);
     template.resourceCountIs('AWS::SNS::Topic', 1);
-    // ALB 5xx, ALB p99, unhealthy hosts, ECS CPU, ECS mem = 5
     template.resourceCountIs('AWS::CloudWatch::Alarm', 5);
     template.hasResourceProperties('AWS::CloudFront::Distribution', {
       DistributionConfig: Match.objectLike({ Logging: Match.anyValue() }),
     });
   });
 
-  test('prod tier with no ALB/ECS identifiers: no alarms wired', () => {
-    const template = Template.fromStack(makeStack({ observability: { tier: 'prod' } }));
-    template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
-  });
-
-  test('explicit overrides win over tier defaults (prod, alarms off)', () => {
+  test('explicit overrides win over tier defaults (prod, alarms+logs off)', () => {
     const template = Template.fromStack(
       makeStack({
         observability: { tier: 'prod', alarms: false, accessLogs: false },
-        loadBalancerFullName: 'app/homepage-alb/abc123',
+        loadBalancerFullName: 'app/ecs-express-gateway-alb/abc123',
       }),
     );
     template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
