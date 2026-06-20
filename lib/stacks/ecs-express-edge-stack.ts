@@ -116,6 +116,26 @@ export class EcsExpressEdgeStack extends cdk.Stack {
 
     const obs = props.observability ? resolveObservability(props.observability) : undefined;
 
+    // Redirect any non-primary alias (e.g. www.kota.dog) to the primary domain
+    // with a 301 — at the edge, before the origin (so it works even though the
+    // origin request policy strips Host).
+    let fnAssoc: cloudfront.FunctionAssociation[] | undefined;
+    if (props.domainName && (props.additionalAliases?.length ?? 0) > 0) {
+      const apex = JSON.stringify(props.domainName);
+      const aliasRedirect = new cloudfront.Function(this, 'AliasRedirect', {
+        runtime: cloudfront.FunctionRuntime.JS_2_0,
+        comment: `Redirect non-${props.domainName} hosts to the apex (301)`,
+        code: cloudfront.FunctionCode.fromInline(
+          `function handler(event){var r=event.request;var h=r.headers.host;` +
+            `if(h&&h.value!==${apex}){var qs=r.querystring;var q='';` +
+            `for(var k in qs){q+=(q?'&':'?')+k+(qs[k].value?('='+qs[k].value):'');}` +
+            `return{statusCode:301,statusDescription:'Moved Permanently',` +
+            `headers:{location:{value:'https://'+${apex}+r.uri+q}}};}return r;}`,
+        ),
+      });
+      fnAssoc = [{ function: aliasRedirect, eventType: cloudfront.FunctionEventType.VIEWER_REQUEST }];
+    }
+
     const origin = new origins.HttpOrigin(props.albDnsName, {
       protocolPolicy: props.originProtocolPolicy ?? cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
       httpsPort: 443,
@@ -129,6 +149,7 @@ export class EcsExpressEdgeStack extends cdk.Stack {
       allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
       cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
       originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+      functionAssociations: fnAssoc,
       compress: true,
     };
 
@@ -138,6 +159,7 @@ export class EcsExpressEdgeStack extends cdk.Stack {
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
       cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+      functionAssociations: fnAssoc,
       compress: true,
     };
 
