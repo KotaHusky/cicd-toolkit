@@ -2,18 +2,34 @@
   "name": "cicd-toolkit",
   "version": "0.0.0",
   "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "lib",
+    "index.ts"
+  ],
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "test": "vitest run",
     "cdk": "cdk"
   },
-  "dependencies": {
+  "peerDependencies": {
     "aws-cdk-lib": "^2.178.0",
     "constructs": "^10.4.2"
   },
   "devDependencies": {
     "@types/node": "^20.17.14",
     "aws-cdk": "^2.178.0",
+    "aws-cdk-lib": "^2.178.0",
+    "constructs": "^10.4.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3",
     "vitest": "^2.1.9"
