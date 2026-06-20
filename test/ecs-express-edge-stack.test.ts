@@ -88,6 +88,23 @@ describe('EcsExpressEdgeStack (Cloudflare DNS, no Route53)', () => {
     });
   });
 
+  test('additionalAliases: extra alias + a 301 redirect CloudFront function', () => {
+    const template = Template.fromStack(makeStack({ additionalAliases: ['www.kota.dog'] }));
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({ Aliases: Match.arrayWith(['kota.dog', 'www.kota.dog']) }),
+    });
+    template.resourceCountIs('AWS::CloudFront::Function', 1);
+    const fn = Object.values(template.findResources('AWS::CloudFront::Function'))[0] as {
+      Properties: { FunctionCode: string };
+    };
+    expect(fn.Properties.FunctionCode).toContain('301');
+  });
+
+  test('no redirect function without additionalAliases', () => {
+    const template = Template.fromStack(makeStack());
+    template.resourceCountIs('AWS::CloudFront::Function', 0);
+  });
+
   test('default-domain mode: no cert, no aliases', () => {
     const app = new cdk.App();
     const template = Template.fromStack(
