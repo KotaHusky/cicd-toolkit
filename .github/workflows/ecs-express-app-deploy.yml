@@ -59,6 +59,11 @@ on:
         required: false
         type: string
         default: ''
+      prod-bake-minutes:
+        description: 'Prod canary bake time (mins). 0 = promote as soon as healthy (default). Raise only for high-traffic services where alarm-based auto-rollback during the soak is worthwhile. Dev is always 0.'
+        required: false
+        type: string
+        default: '0'
     secrets:
       role-arn:
         required: true
@@ -88,6 +93,7 @@ jobs:
       obs_tier: ${{ steps.c.outputs.obs_tier }}
       stack: ${{ steps.c.outputs.stack }}
       cert_arn: ${{ steps.c.outputs.cert_arn }}
+      bake: ${{ steps.c.outputs.bake }}
     steps:
       - id: c
         env:
@@ -104,16 +110,21 @@ jobs:
             *)            ENV="${{ inputs.environment || 'dev' }}" ;;
           esac
           if [ "$ENV" = "prod" ]; then
+            # bake = prod-bake-minutes (default 0). Raise it only for a
+            # high-traffic service where alarm-based auto-rollback during the
+            # post-shift soak is meaningful (a low-traffic site's 4xx/5xx alarm
+            # rarely gets enough datapoints to fire anyway).
             {
               echo "env=prod"; echo "service=${APP}"; echo "min_tasks=1"
               echo "domain=${PROD_DOMAIN}"; echo "obs_tier=prod"; echo "stack=${PREFIX}Prod"
-              echo "cert_arn=${PROD_CERT}"
+              echo "cert_arn=${PROD_CERT}"; echo "bake=${{ inputs.prod-bake-minutes }}"
             } >> "$GITHUB_OUTPUT"
           else
+            # dev: zero canary bake -> promote as soon as healthy (~3-4 min deploys)
             {
               echo "env=dev"; echo "service=${APP}-dev"; echo "min_tasks=0"
               echo "domain=${DEV_DOMAIN}"; echo "obs_tier=dev"; echo "stack=${PREFIX}Dev"
-              echo "cert_arn=${DEV_CERT}"
+              echo "cert_arn=${DEV_CERT}"; echo "bake=0"
             } >> "$GITHUB_OUTPUT"
           fi
 
@@ -175,6 +186,7 @@ jobs:
       container-port: ${{ inputs.container-port }}
       health-check-path: ${{ inputs.health-check-path }}
       min-task-count: ${{ fromJSON(needs.config.outputs.min_tasks) }}
+      bake-time-minutes: ${{ needs.config.outputs.bake }}
     secrets:
       role-arn: ${{ secrets.role-arn }}
       execution-role-arn: ${{ secrets.execution-role-arn }}
@@ -182,9 +194,12 @@ jobs:
 
   edge:
     needs: [config, service, changes]
+    # Only run the slow CloudFront edge when infra/ changed, or on a manual
+    # dispatch (first-time setup). Routine code pushes (prod) and PR updates
+    # (dev) skip it entirely -> much faster deploys.
     if: >-
       always() && needs.service.result == 'success' &&
-      (github.event_name != 'push' || needs.changes.outputs.infra == 'true')
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.infra == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
