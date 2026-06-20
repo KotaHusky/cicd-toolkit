@@ -79,6 +79,7 @@ jobs:
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'deploy:dev')
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       env: ${{ steps.c.outputs.env }}
       service: ${{ steps.c.outputs.service }}
@@ -119,6 +120,7 @@ jobs:
   changes:
     needs: [config]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       infra: ${{ steps.f.outputs.infra }}
     steps:
@@ -143,6 +145,7 @@ jobs:
   mirror:
     needs: [config, image]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       id-token: write
       contents: read
@@ -183,6 +186,7 @@ jobs:
       always() && needs.service.result == 'success' &&
       (github.event_name != 'push' || needs.changes.outputs.infra == 'true')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       id-token: write
       contents: read
