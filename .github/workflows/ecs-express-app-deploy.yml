@@ -1,0 +1,243 @@
+name: ECS Express App Deploy
+
+# Reusable end-to-end deploy for a containerized (Next.js) app on ECS Express
+# behind CloudFront, with dev/prod environments and Cloudflare DNS.
+#
+#   build image -> mirror to ECR -> ECS Express service -> CloudFront edge.
+#
+# Environment is derived from the CALLER's trigger:
+#   push          -> prod   (domain = prod-domain, min-tasks 1, obs prod)
+#   pull_request  -> dev    (domain = dev-domain,  min-tasks 0, obs dev)   [gated on the `deploy:dev` label]
+#   workflow_dispatch -> the `environment` input
+#
+# The caller owns the `infra/` CDK app (a thin bin/app.ts that reads -c stackName
+# etc. and instantiates EcsExpressEdgeStack) and the on: triggers. DNS is on
+# Cloudflare — after a first deploy add CNAME <domain> -> <DistributionDomain>.
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: 'App slug = GHCR image name + ECR repo + prod service name (e.g. homepage)'
+        required: true
+        type: string
+      stack-prefix:
+        description: 'CDK stack id prefix; stacks are <prefix>Prod / <prefix>Dev'
+        required: true
+        type: string
+      prod-domain:
+        required: true
+        type: string
+      dev-domain:
+        required: true
+        type: string
+      prod-cert-arn:
+        description: 'us-east-1 ACM cert ARN for prod-domain'
+        required: true
+        type: string
+      dev-cert-arn:
+        description: 'us-east-1 ACM cert ARN for dev-domain'
+        required: true
+        type: string
+      aws-account-id:
+        required: true
+        type: string
+      aws-region:
+        required: false
+        type: string
+        default: us-east-1
+      container-port:
+        required: false
+        type: number
+        default: 3000
+      health-check-path:
+        required: false
+        type: string
+        default: /api/health
+      environment:
+        description: 'Override env for workflow_dispatch (dev|prod)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      role-arn:
+        required: true
+      execution-role-arn:
+        required: true
+      infrastructure-role-arn:
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  config:
+    # PRs only deploy when carrying the `deploy:dev` label.
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'deploy:dev')
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.c.outputs.env }}
+      service: ${{ steps.c.outputs.service }}
+      min_tasks: ${{ steps.c.outputs.min_tasks }}
+      domain: ${{ steps.c.outputs.domain }}
+      obs_tier: ${{ steps.c.outputs.obs_tier }}
+      stack: ${{ steps.c.outputs.stack }}
+      cert_arn: ${{ steps.c.outputs.cert_arn }}
+    steps:
+      - id: c
+        env:
+          APP: ${{ inputs.app }}
+          PREFIX: ${{ inputs.stack-prefix }}
+          PROD_DOMAIN: ${{ inputs.prod-domain }}
+          DEV_DOMAIN: ${{ inputs.dev-domain }}
+          PROD_CERT: ${{ inputs.prod-cert-arn }}
+          DEV_CERT: ${{ inputs.dev-cert-arn }}
+        run: |
+          case "${{ github.event_name }}" in
+            push)         ENV=prod ;;
+            pull_request) ENV=dev ;;
+            *)            ENV="${{ inputs.environment || 'dev' }}" ;;
+          esac
+          if [ "$ENV" = "prod" ]; then
+            {
+              echo "env=prod"; echo "service=${APP}"; echo "min_tasks=1"
+              echo "domain=${PROD_DOMAIN}"; echo "obs_tier=prod"; echo "stack=${PREFIX}Prod"
+              echo "cert_arn=${PROD_CERT}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "env=dev"; echo "service=${APP}-dev"; echo "min_tasks=0"
+              echo "domain=${DEV_DOMAIN}"; echo "obs_tier=dev"; echo "stack=${PREFIX}Dev"
+              echo "cert_arn=${DEV_CERT}"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+  changes:
+    needs: [config]
+    runs-on: ubuntu-latest
+    outputs:
+      infra: ${{ steps.f.outputs.infra }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: f
+        with:
+          filters: |
+            infra:
+              - 'infra/**'
+              - '.github/workflows/**'
+
+  image:
+    needs: [config]
+    uses: KotaHusky/cicd-toolkit/.github/workflows/docker-ghcr.yml@main
+    with:
+      push: true
+    permissions:
+      contents: read
+      packages: write
+
+  mirror:
+    needs: [config, image]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      ecr-image: ${{ steps.mirror.outputs.ecr-image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.role-arn }}
+          aws-region: ${{ inputs.aws-region }}
+      - id: mirror
+        uses: KotaHusky/cicd-toolkit/actions/ecr-mirror@v2
+        with:
+          source-image: ghcr.io/kotahusky/${{ inputs.app }}@${{ needs.image.outputs.digest }}
+          ecr-repo: ${{ inputs.app }}
+          ecr-tag: ${{ github.sha }}
+          aws-region: ${{ inputs.aws-region }}
+
+  service:
+    needs: [config, mirror]
+    uses: KotaHusky/cicd-toolkit/.github/workflows/ecs-express-deploy.yml@main
+    with:
+      service-name: ${{ needs.config.outputs.service }}
+      image: ${{ needs.mirror.outputs.ecr-image }}
+      aws-region: ${{ inputs.aws-region }}
+      container-port: ${{ inputs.container-port }}
+      health-check-path: ${{ inputs.health-check-path }}
+      min-task-count: ${{ fromJSON(needs.config.outputs.min_tasks) }}
+    secrets:
+      role-arn: ${{ secrets.role-arn }}
+      execution-role-arn: ${{ secrets.execution-role-arn }}
+      infrastructure-role-arn: ${{ secrets.infrastructure-role-arn }}
+
+  edge:
+    needs: [config, service, changes]
+    if: >-
+      always() && needs.service.result == 'success' &&
+      (github.event_name != 'push' || needs.changes.outputs.infra == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.role-arn }}
+          aws-region: ${{ inputs.aws-region }}
+      - name: Resolve ALB + ECS identifiers for the dashboard (best-effort)
+        id: ids
+        shell: bash
+        env:
+          SVC: ${{ needs.config.outputs.service }}
+        run: |
+          SERVICE_ARN='${{ needs.service.outputs.service-arn }}'
+          echo "cluster=$(echo "$SERVICE_ARN" | awk -F'/' '{print $2}')" >> "$GITHUB_OUTPUT"
+          echo "service=$(echo "$SERVICE_ARN" | awk -F'/' '{print $3}')" >> "$GITHUB_OUTPUT"
+          LB_ARN=$(aws elbv2 describe-load-balancers \
+            --query "LoadBalancers[?starts_with(LoadBalancerName,'ecs-express-gateway')].LoadBalancerArn | [0]" \
+            --output text 2>/dev/null || true)
+          if [ -n "$LB_ARN" ] && [ "$LB_ARN" != "None" ]; then
+            echo "lb=$(echo "$LB_ARN" | sed 's#.*:loadbalancer/##')" >> "$GITHUB_OUTPUT"
+            TG_ARN=$(aws elbv2 describe-target-groups --load-balancer-arn "$LB_ARN" \
+              --query "TargetGroups[?contains(TargetGroupName,'${SVC}')].TargetGroupArn | [0]" \
+              --output text 2>/dev/null || true)
+            if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
+              echo "tg=$(echo "$TG_ARN" | sed 's#.*:##')" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "::warning::ECS Express gateway ALB not found; dashboard ALB widgets skipped"
+          fi
+      - name: Cache infra node_modules (rebuilds the cicd-toolkit git dep)
+        uses: actions/cache@v4
+        with:
+          path: infra/node_modules
+          key: infra-nm-${{ runner.os }}-${{ hashFiles('infra/package-lock.json') }}
+      - name: Deploy edge stack (${{ needs.config.outputs.env }})
+        working-directory: infra
+        run: |
+          npm ci --prefer-offline
+          npx cdk deploy ${{ needs.config.outputs.stack }} --require-approval never \
+            -c account=${{ inputs.aws-account-id }} \
+            -c region=${{ inputs.aws-region }} \
+            -c stackName=${{ needs.config.outputs.stack }} \
+            -c albDns='${{ needs.service.outputs.endpoint }}' \
+            -c domainName=${{ needs.config.outputs.domain }} \
+            -c certificateArn=${{ needs.config.outputs.cert_arn }} \
+            -c observabilityTier=${{ needs.config.outputs.obs_tier }} \
+            -c serviceName=${{ needs.config.outputs.service }} \
+            -c dashboardName=${{ needs.config.outputs.stack }} \
+            -c loadBalancerFullName='${{ steps.ids.outputs.lb }}' \
+            -c targetGroupFullName='${{ steps.ids.outputs.tg }}' \
+            -c ecsClusterName='${{ steps.ids.outputs.cluster }}' \
+            -c ecsServiceName='${{ steps.ids.outputs.service }}'
