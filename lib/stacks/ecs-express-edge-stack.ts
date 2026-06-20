@@ -5,7 +5,11 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53Targets from 'aws-cdk-lib/aws-route53-targets';
 import { Construct } from 'constructs';
-import { EcsExpressDashboard } from '../constructs/ecs-express-dashboard';
+import {
+  EcsExpressObservability,
+  ObservabilityProps,
+  resolveObservability,
+} from '../constructs/ecs-express-observability';
 
 export interface EcsExpressEdgeStackProps extends cdk.StackProps {
   /**
@@ -38,23 +42,24 @@ export interface EcsExpressEdgeStackProps extends cdk.StackProps {
    *  HTTPS_ONLY only if you've attached a cert to the ALB's 443 listener. */
   originProtocolPolicy?: cloudfront.OriginProtocolPolicy;
 
-  // --- Observability -------------------------------------------------------
-  /** Friendly service name for the dashboard title/name. Defaults to
+  // --- Observability (opt-in) ----------------------------------------------
+  /** Friendly service name for dashboard/alarm naming. Defaults to
    *  `domainName`, else the ALB DNS name. */
   serviceName?: string;
-  /** Create a CloudWatch dashboard (CloudFront + ALB + ECS) for this app.
-   *  Defaults to true. */
-  createDashboard?: boolean;
+  /** Opt-in observability (dashboard, alarms, access logs, log retention,
+   *  X-Ray flag) with dev/prod tiers. OMIT to create nothing — the dashboard is
+   *  no longer on by default. */
+  observability?: ObservabilityProps;
   /** Override the dashboard name. Defaults to `${serviceName}-ecs-express`. */
   dashboardName?: string;
   /** ALB CloudWatch dimension `app/<lb-name>/<lb-id>` (tail of the ALB ARN).
-   *  Supply from the deploy workflow to add ALB widgets. */
+   *  Enables ALB widgets + alarms. */
   loadBalancerFullName?: string;
-  /** Target group dimension `targetgroup/<name>/<id>` for host-health widgets. */
+  /** Target group dimension `targetgroup/<name>/<id>` for host-health. */
   targetGroupFullName?: string;
-  /** ECS cluster name (from the service ARN) to add compute widgets. */
+  /** ECS cluster name (default `default`) for compute widgets + alarms. */
   ecsClusterName?: string;
-  /** ECS service name (from the service ARN) to add compute widgets. */
+  /** ECS service name for compute widgets + alarms. */
   ecsServiceName?: string;
 }
 
@@ -88,8 +93,8 @@ export class EcsExpressEdgeStack extends cdk.Stack {
   public readonly certificate?: acm.Certificate;
   /** Only set when a custom domain is configured. */
   public readonly hostedZone?: route53.IHostedZone;
-  /** Only set when createDashboard is not false. */
-  public readonly dashboard?: EcsExpressDashboard;
+  /** Only set when observability is enabled. */
+  public readonly observability?: EcsExpressObservability;
 
   constructor(scope: Construct, id: string, props: EcsExpressEdgeStackProps) {
     super(scope, id, props);
@@ -113,6 +118,8 @@ export class EcsExpressEdgeStack extends cdk.Stack {
         validation: acm.CertificateValidation.fromDns(this.hostedZone),
       });
     }
+
+    const obs = props.observability ? resolveObservability(props.observability) : undefined;
 
     const origin = new origins.HttpOrigin(props.albDnsName, {
       protocolPolicy: props.originProtocolPolicy ?? cloudfront.OriginProtocolPolicy.HTTP_ONLY,
@@ -151,6 +158,10 @@ export class EcsExpressEdgeStack extends cdk.Stack {
       priceClass: props.priceClass ?? cloudfront.PriceClass.PRICE_CLASS_100,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
+      // CloudFront standard access logs — CDK provisions the log bucket. Since
+      // CloudFront fronts all traffic, these are the meaningful access logs
+      // (ALB-level logs would only add origin-fetch detail).
+      enableLogging: obs?.accessLogs ?? false,
       comment: `ECS Express edge for ${props.domainName ?? props.albDnsName}`,
     });
 
@@ -171,10 +182,11 @@ export class EcsExpressEdgeStack extends cdk.Stack {
     }
 
     const serviceName = props.serviceName ?? props.domainName ?? props.albDnsName;
-    if (props.createDashboard !== false) {
-      this.dashboard = new EcsExpressDashboard(this, 'Dashboard', {
-        distribution: this.distribution,
+    if (obs) {
+      this.observability = new EcsExpressObservability(this, 'Observability', {
+        config: obs,
         serviceName,
+        distribution: this.distribution,
         dashboardName: props.dashboardName,
         loadBalancerFullName: props.loadBalancerFullName,
         targetGroupFullName: props.targetGroupFullName,

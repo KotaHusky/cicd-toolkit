@@ -16,3 +16,11 @@ export { OidcBootstrapStack, OidcBootstrapStackProps, RepoRole } from './lib/sta
 export { applyTags } from './lib/constructs/standard-tags';
 export { StaticSiteDashboard, StaticSiteDashboardProps } from './lib/constructs/static-site-dashboard';
 export { EcsExpressDashboard, EcsExpressDashboardProps } from './lib/constructs/ecs-express-dashboard';
+export {
+  EcsExpressObservability,
+  EcsExpressObservabilityProps,
+  ObservabilityProps,
+  ObservabilityTier,
+  ResolvedObservability,
+  resolveObservability,
+} from './lib/constructs/ecs-express-observability';

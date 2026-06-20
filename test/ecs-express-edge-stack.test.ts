@@ -133,14 +133,56 @@ describe('EcsExpressEdgeStack', () => {
     expect(keys.some((k) => k.includes('SiteUrl'))).toBe(true);
   });
 
-  test('creates a CloudWatch dashboard by default', () => {
+  test('observability is opt-in: no dashboard/alarms by default', () => {
     const template = Template.fromStack(makeStack());
-    template.resourceCountIs('AWS::CloudWatch::Dashboard', 1);
+    template.resourceCountIs('AWS::CloudWatch::Dashboard', 0);
+    template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
   });
 
-  test('omits the dashboard when createDashboard is false', () => {
-    const template = Template.fromStack(makeStack({ createDashboard: false }));
-    template.resourceCountIs('AWS::CloudWatch::Dashboard', 0);
+  test('dev tier: dashboard, no alarms, no access logs', () => {
+    const template = Template.fromStack(makeStack({ observability: { tier: 'dev' } }));
+    template.resourceCountIs('AWS::CloudWatch::Dashboard', 1);
+    template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({ Logging: Match.absent() }),
+    });
+  });
+
+  test('prod tier: dashboard + alarms + SNS + CloudFront access logs', () => {
+    const template = Template.fromStack(
+      makeStack({
+        observability: { tier: 'prod', alarmEmail: 'ops@kota.dog' },
+        loadBalancerFullName: 'app/homepage-alb/abc123',
+        targetGroupFullName: 'targetgroup/homepage-tg/def456',
+        ecsClusterName: 'default',
+        ecsServiceName: 'homepage',
+      }),
+    );
+    template.resourceCountIs('AWS::CloudWatch::Dashboard', 1);
+    template.resourceCountIs('AWS::SNS::Topic', 1);
+    // ALB 5xx, ALB p99, unhealthy hosts, ECS CPU, ECS mem = 5
+    template.resourceCountIs('AWS::CloudWatch::Alarm', 5);
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({ Logging: Match.anyValue() }),
+    });
+  });
+
+  test('prod tier with no ALB/ECS identifiers: no alarms wired', () => {
+    const template = Template.fromStack(makeStack({ observability: { tier: 'prod' } }));
+    template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
+  });
+
+  test('explicit overrides win over tier defaults (prod, alarms off)', () => {
+    const template = Template.fromStack(
+      makeStack({
+        observability: { tier: 'prod', alarms: false, accessLogs: false },
+        loadBalancerFullName: 'app/homepage-alb/abc123',
+      }),
+    );
+    template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({ Logging: Match.absent() }),
+    });
   });
 });
 
