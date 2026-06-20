@@ -21,6 +21,11 @@ on:
         required: false
         type: string
         default: ''
+      bake-time-minutes:
+        description: 'Canary bake time (mins). 0 = promote as soon as healthy (fast, for dev). Empty = leave service default. Applied before deploy if the service already exists.'
+        required: false
+        type: string
+        default: ''
       container-port:
         description: 'Container port that receives traffic'
         required: false
@@ -147,6 +152,30 @@ jobs:
         with:
           role-to-assume: ${{ secrets.role-arn }}
           aws-region: ${{ inputs.aws-region }}
+
+      # ECS Express forces a CANARY strategy with a 3+3 min bake by default.
+      # The strategy can't change, but the bake CAN (0-1440). Setting it before
+      # the deploy makes the canary promote as soon as the task is healthy.
+      # (Only possible on an existing service; first-ever create uses defaults.)
+      - name: Set canary bake time
+        if: inputs.bake-time-minutes != ''
+        shell: bash
+        env:
+          SVC: ${{ inputs.service-name }}
+          CLUSTER: ${{ inputs.cluster || 'default' }}
+          BAKE: ${{ inputs.bake-time-minutes }}
+        run: |
+          CFG=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" \
+            --query "services[?status=='ACTIVE']|[0].deploymentConfiguration" --output json 2>/dev/null || true)
+          if [ -n "$CFG" ] && [ "$CFG" != "null" ]; then
+            NEW=$(echo "$CFG" | jq --argjson b "$BAKE" \
+              '.bakeTimeInMinutes=$b | (.canaryConfiguration.canaryBakeTimeInMinutes)=$b')
+            aws ecs update-service --cluster "$CLUSTER" --service "$SVC" \
+              --deployment-configuration "$NEW" >/dev/null
+            echo "Set canary bake time to ${BAKE}m for $SVC"
+          else
+            echo "::notice::$SVC not found yet (first deploy) — bake stays at Express default"
+          fi
 
       - name: Deploy to ECS Express Mode
         id: deploy
