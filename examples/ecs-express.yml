@@ -1,0 +1,71 @@
+# Example: tag-driven release pipeline for a containerized app deployed to ECS Express Mode.
+#
+# Flow on push to main:
+#   1. semver-tag    — bumps version from conventional commits, creates vX.Y.Z tag
+#   2. docker-ghcr   — builds image, pushes to ghcr.io tagged with the new version
+#   3. mirror        — mirrors the ghcr image into a private ECR repo
+#   4. deploy        — ecs-express-deploy points the service at the new ECR image
+#   5. release       — AI-generated GitHub Release (fires on the tag push)
+#
+# The release workflow runs separately on the `v*` tag push created by semver-tag.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write       # semver-tag needs to push tags
+  packages: write       # docker-ghcr needs to push to ghcr.io
+  id-token: write       # OIDC for AWS
+
+jobs:
+  version:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/semver-tag.yml@main
+    with:
+      default-bump: 'patch'
+
+  image:
+    needs: version
+    if: needs.version.outputs.bumped == 'true'
+    uses: KotaHusky/cicd-toolkit/.github/workflows/docker-ghcr.yml@main
+    with:
+      version: ${{ needs.version.outputs.new-version }}
+
+  mirror:
+    needs: [version, image]
+    if: needs.version.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      ecr-image: ${{ steps.mirror.outputs.ecr-image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+      - id: mirror
+        uses: KotaHusky/cicd-toolkit/actions/ecr-mirror@v2
+        with:
+          source-image: ghcr.io/${{ github.repository }}:v${{ needs.version.outputs.new-version }}
+          ecr-tag: v${{ needs.version.outputs.new-version }}
+          aws-region: us-east-1
+
+  deploy:
+    needs: [version, mirror]
+    if: needs.version.outputs.bumped == 'true'
+    uses: KotaHusky/cicd-toolkit/.github/workflows/ecs-express-deploy.yml@main
+    with:
+      service-name: my-app
+      image: ${{ needs.mirror.outputs.ecr-image }}
+      aws-region: us-east-1
+      container-port: 3000
+      health-check-path: /api/health
+    secrets:
+      role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+      execution-role-arn: ${{ secrets.ECS_EXECUTION_ROLE_ARN }}
+      infrastructure-role-arn: ${{ secrets.ECS_INFRASTRUCTURE_ROLE_ARN }}
