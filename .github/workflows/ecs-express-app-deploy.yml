@@ -50,6 +50,16 @@ on:
         required: false
         type: number
         default: 3000
+      cpu:
+        description: 'Fargate CPU units. Default 256 (0.25 vCPU) — the Fargate floor; right-sized for low-traffic SSR. Raise for heavier apps.'
+        required: false
+        type: string
+        default: '256'
+      memory:
+        description: 'Fargate memory (MiB). Default 512 — the floor for 256 CPU. Valid mem for 256 CPU: 512/1024/2048.'
+        required: false
+        type: string
+        default: '512'
       health-check-path:
         required: false
         type: string
@@ -184,6 +194,8 @@ jobs:
       image: ${{ needs.mirror.outputs.ecr-image }}
       aws-region: ${{ inputs.aws-region }}
       container-port: ${{ inputs.container-port }}
+      cpu: ${{ inputs.cpu }}
+      memory: ${{ inputs.memory }}
       health-check-path: ${{ inputs.health-check-path }}
       min-task-count: ${{ fromJSON(needs.config.outputs.min_tasks) }}
       bake-time-minutes: ${{ needs.config.outputs.bake }}
