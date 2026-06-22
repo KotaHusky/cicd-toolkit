@@ -143,11 +143,24 @@ export class EcsExpressEdgeStack extends cdk.Stack {
 
     // SSR responses are dynamic: don't cache, forward everything (minus Host so
     // the gateway routes to the right service by its origin hostname).
+    // Force HTML to revalidate on every request so deploys are immediately
+    // visible. The SSR origin (Next.js) emits a long `stale-while-revalidate`,
+    // which makes browsers serve the previous page while refreshing in the
+    // background; override the header at the edge so clients always revalidate.
+    const ssrCacheControl = new cloudfront.ResponseHeadersPolicy(this, 'SsrCacheControl', {
+      customHeadersBehavior: {
+        customHeaders: [
+          { header: 'cache-control', value: 'no-cache, must-revalidate', override: true },
+        ],
+      },
+    });
+
     const ssrBehavior: cloudfront.BehaviorOptions = {
       origin,
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
       cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+      responseHeadersPolicy: ssrCacheControl,
       originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
       functionAssociations: fnAssoc,
       compress: true,
