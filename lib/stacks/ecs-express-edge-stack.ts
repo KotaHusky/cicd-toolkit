@@ -176,11 +176,34 @@ export class EcsExpressEdgeStack extends cdk.Stack {
       compress: true,
     };
 
+    // Next.js image optimizer: /_next/image?url=...&w=...&q=... — the query
+    // string carries the params, so it must be forwarded AND keyed in the cache
+    // (CACHING_OPTIMIZED drops query strings, which makes the optimizer 400).
+    const imageCachePolicy = new cloudfront.CachePolicy(this, 'NextImageCache', {
+      comment: 'Next.js image optimizer (url/w/q + Accept)',
+      queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
+      headerBehavior: cloudfront.CacheHeaderBehavior.allowList('Accept'),
+      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+      enableAcceptEncodingGzip: true,
+      enableAcceptEncodingBrotli: true,
+      defaultTtl: cdk.Duration.days(7),
+      minTtl: cdk.Duration.seconds(0),
+      maxTtl: cdk.Duration.days(365),
+    });
+    const imageBehavior: cloudfront.BehaviorOptions = {
+      origin,
+      viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+      cachePolicy: imageCachePolicy,
+      functionAssociations: fnAssoc,
+      compress: true,
+    };
+
     this.distribution = new cloudfront.Distribution(this, 'EdgeDistribution', {
       defaultBehavior: ssrBehavior,
       additionalBehaviors: {
         '/_next/static/*': staticBehavior,
-        '/_next/image*': staticBehavior,
+        '/_next/image*': imageBehavior,
       },
       domainNames: aliases,
       certificate: this.certificate,
