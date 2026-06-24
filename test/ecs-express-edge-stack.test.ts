@@ -56,6 +56,34 @@ describe('EcsExpressEdgeStack (Cloudflare DNS, no Route53)', () => {
     expect(patterns).toContain('/_next/image*');
   });
 
+  test('/_next/image* forwards the query string (a custom cache policy keyed on it)', () => {
+    const stack = makeStack();
+    const template = Template.fromStack(stack);
+
+    // A custom cache policy that includes the full query string in the key.
+    template.hasResourceProperties('AWS::CloudFront::CachePolicy', {
+      CachePolicyConfig: Match.objectLike({
+        ParametersInCacheKeyAndForwardedToOrigin: Match.objectLike({
+          QueryStringsConfig: Match.objectLike({ QueryStringBehavior: 'all' }),
+        }),
+      }),
+    });
+
+    // The /_next/image* behavior must NOT use the managed CACHING_OPTIMIZED
+    // policy (which strips the query string and 400s the optimizer).
+    const dist = Object.values(template.findResources('AWS::CloudFront::Distribution'))[0] as {
+      Properties: {
+        DistributionConfig: { CacheBehaviors?: Array<{ PathPattern: string; CachePolicyId: unknown }> };
+      };
+    };
+    const CACHING_OPTIMIZED = '658327ea-f89d-4fab-a63d-7e88639e58f6';
+    const imageBehavior = (dist.Properties.DistributionConfig.CacheBehaviors ?? []).find(
+      (b) => b.PathPattern === '/_next/image*',
+    );
+    expect(imageBehavior).toBeDefined();
+    expect(imageBehavior?.CachePolicyId).not.toBe(CACHING_OPTIMIZED);
+  });
+
   test('allows all HTTP methods on the default behavior (SSR needs POST)', () => {
     const template = Template.fromStack(makeStack());
     template.hasResourceProperties('AWS::CloudFront::Distribution', {

@@ -199,6 +199,32 @@ export class EcsExpressEdgeStack extends cdk.Stack {
       compress: true,
     };
 
+    // The Next.js image optimizer (`/_next/image`) keys responses on the
+    // `?url`, `w` and `q` query string and the `Accept` header (avif/webp
+    // negotiation). CACHING_OPTIMIZED drops the query string, so the optimizer
+    // receives a bare `/_next/image` and 400s with "url parameter is required".
+    // Include those in the cache key (so each size caches separately) and
+    // forward them to the origin.
+    const imageCachePolicy = new cloudfront.CachePolicy(this, 'NextImageCachePolicy', {
+      comment: 'Next.js /_next/image: query string + Accept in cache key',
+      queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
+      headerBehavior: cloudfront.CacheHeaderBehavior.allowList('Accept'),
+      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+      enableAcceptEncodingGzip: true,
+      enableAcceptEncodingBrotli: true,
+      minTtl: cdk.Duration.seconds(0),
+      defaultTtl: cdk.Duration.days(1),
+      maxTtl: cdk.Duration.days(365),
+    });
+
+    const imageBehavior: cloudfront.BehaviorOptions = {
+      origin,
+      viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+      cachePolicy: imageCachePolicy,
+      compress: true,
+    };
+
     this.distribution = new cloudfront.Distribution(this, 'EdgeDistribution', {
       defaultBehavior: ssrBehavior,
       additionalBehaviors: {
