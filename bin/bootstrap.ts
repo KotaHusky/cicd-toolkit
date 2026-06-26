@@ -79,6 +79,28 @@ new OidcBootstrapStack(app, 'OidcBootstrapStack', {
             'arn:aws:cloudformation:*:*:stack/cdk-*/*',
           ],
         }),
+        // Account-scoped CloudFormation actions that do NOT support resource-level
+        // permissions and must be granted on '*'. ListStacks is used by CDK's
+        // rollback-detection pre-check; without it the deploy logs AccessDenied.
+        new iam.PolicyStatement({
+          actions: ['cloudformation:ListStacks'],
+          resources: ['*'],
+        }),
+        // Cloud Control direct resource ops used by `cdk deploy --method=direct`.
+        // Previously added to the live role only as a CLI stopgap
+        // (inline policy GitHubDeployDirectResourceOps); codified here so a
+        // re-bootstrap does not silently drop it.
+        new iam.PolicyStatement({
+          sid: 'CdkDirectDeployResourceOps',
+          actions: [
+            'cloudformation:CreateResource',
+            'cloudformation:UpdateResource',
+            'cloudformation:DeleteResource',
+            'cloudformation:GetResource',
+            'cloudformation:ListResources',
+          ],
+          resources: ['arn:aws:cloudformation:*:*:resource/*'],
+        }),
         new iam.PolicyStatement({
           actions: ['s3:*'],
           resources: [
