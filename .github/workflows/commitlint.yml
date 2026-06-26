@@ -8,6 +8,10 @@ on:
         required: false
         type: string
         default: '24'
+    secrets:
+      node-auth-token:
+        description: 'Token for installing private GitHub Packages (npm) deps. Optional.'
+        required: false
 
 concurrency:
   group: commitlint-${{ github.workflow }}-${{ github.ref }}
@@ -36,6 +40,8 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.node-auth-token }}
 
       - name: Run commitlint
         run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }}
