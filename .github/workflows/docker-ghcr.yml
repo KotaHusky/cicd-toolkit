@@ -43,6 +43,10 @@ on:
       digest:
         description: 'Image digest'
         value: ${{ jobs.build.outputs.digest }}
+    secrets:
+      node-auth-token:
+        description: 'Token for installing private GitHub Packages (npm) deps during the build. Optional.'
+        required: false
 
 concurrency:
   group: docker-${{ github.workflow }}-${{ github.ref }}
@@ -107,5 +111,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ inputs.platforms }}
           build-args: ${{ inputs.build-args }}
+          secrets: |
+            node_auth_token=${{ secrets.node-auth-token }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
