@@ -23,9 +23,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Fetch base commit
-        run: git fetch --depth=$(( ${{ github.event.pull_request.commits }} + 1 )) origin ${{ github.event.pull_request.base.sha }}
+          # Full history so `commitlint --from base --to head` can resolve the
+          # merge-base. A shallow head checkout plus a separate shallow base
+          # fetch leaves the two histories disconnected, which fails even for a
+          # single-commit PR with "Cannot find merge-base between <base> <head>".
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
