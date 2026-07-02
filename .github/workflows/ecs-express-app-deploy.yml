@@ -86,6 +86,9 @@ on:
         required: true
       infrastructure-role-arn:
         required: true
+      node-auth-token:
+        description: 'PAT (read:packages) for private npm deps during the image build. Optional; omit for public-dep apps.'
+        required: false
 
 permissions:
   contents: read
@@ -151,6 +154,8 @@ jobs:
     uses: KotaHusky/cicd-toolkit/.github/workflows/docker-ghcr.yml@main
     with:
       push: true
+    secrets:
+      node-auth-token: ${{ secrets.node-auth-token }}
     permissions:
       contents: read
       packages: write
