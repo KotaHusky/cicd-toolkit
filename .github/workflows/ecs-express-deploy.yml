@@ -138,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     # Fail fast if ECS never reaches steady state (e.g. tasks failing health
     # checks) instead of hanging on the action's stability wait.
-    timeout-minutes: 15
+    timeout-minutes: 30
     outputs:
       service-arn: ${{ steps.deploy.outputs.service-arn }}
       endpoint: ${{ steps.deploy.outputs.endpoint }}
