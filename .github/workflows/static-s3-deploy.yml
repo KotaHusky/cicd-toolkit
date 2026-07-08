@@ -159,11 +159,10 @@ jobs:
               --cache-control "public, max-age=31536000, immutable"
           fi
 
-          # `grep -c` exits 1 on no-match AND prints `0`; chaining `|| echo 0`
-          # then double-printed it, producing a multiline value that
-          # $GITHUB_OUTPUT rejects ("Invalid format '0'"). `wc -l` on the
-          # filtered stream always exits 0 and always emits a single integer.
-          COUNT=$(grep -E '^(upload|copy):' /tmp/sync.log | wc -l | tr -d ' ')
+          # grep exits 1 on no-match; with pipefail+bash5 that propagates through $().
+          # Wrap in a group command with `|| true` so the pipeline always exits 0
+          # while still counting zero when there are no upload/copy lines.
+          COUNT=$({ grep -E '^(upload|copy):' /tmp/sync.log || true; } | wc -l | tr -d ' ')
           echo "objects-uploaded=${COUNT}" >> "$GITHUB_OUTPUT"
 
       - name: Invalidate CloudFront cache
