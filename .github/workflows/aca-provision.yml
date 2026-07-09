@@ -38,6 +38,7 @@ concurrency:
 jobs:
   provision:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       id-token: write
       contents: read

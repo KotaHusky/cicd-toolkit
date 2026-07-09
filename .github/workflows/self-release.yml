@@ -5,8 +5,39 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   release:
     uses: ./.github/workflows/release.yml
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  float-tags:
+    name: Advance floating major/minor tags
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+
+      - name: Advance floating tags
+        shell: bash
+        run: |
+          # e.g. v2.5.4 → advance v2 and v2.5 to point at this commit
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            MAJOR="v${BASH_REMATCH[1]}"
+            MINOR="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -fa "$MAJOR" -m "Update floating tag $MAJOR → $TAG"
+            git tag -fa "$MINOR" -m "Update floating tag $MINOR → $TAG"
+            git push origin "$MAJOR" "$MINOR" --force
+            echo "Advanced $MAJOR and $MINOR to $TAG"
+          else
+            echo "Tag $TAG is not a full semver patch; skipping floating tags."
+          fi

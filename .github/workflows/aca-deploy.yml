@@ -76,6 +76,7 @@ jobs:
   deploy:
     name: Deploy to ACA
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       fqdn: ${{ steps.fqdn.outputs.fqdn }}
     steps:

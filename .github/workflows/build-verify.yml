@@ -41,6 +41,7 @@ jobs:
   install:
     name: Install dependencies
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -76,6 +77,7 @@ jobs:
     needs: install
     if: ${{ inputs.run-build }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -102,6 +104,7 @@ jobs:
     needs: install
     if: ${{ inputs.run-tests }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -128,6 +131,7 @@ jobs:
     needs: install
     if: ${{ inputs.run-lint }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

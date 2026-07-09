@@ -1,0 +1,40 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns:
+          - 'actions/*'
+          - 'docker/*'
+          - 'aws-actions/*'
+          - 'azure/*'
+      third-party:
+        patterns:
+          - '*'
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore(deps)
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      aws-cdk:
+        patterns:
+          - 'aws-cdk*'
+          - '@aws-cdk/*'
+      dev:
+        dependency-type: development
+        patterns:
+          - '*'
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore(deps)

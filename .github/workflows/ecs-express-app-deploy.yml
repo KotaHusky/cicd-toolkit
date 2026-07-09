@@ -90,6 +90,10 @@ on:
         description: 'PAT (read:packages) for private npm deps during the image build. Optional; omit for public-dep apps.'
         required: false
 
+concurrency:
+  group: ecs-express-app-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: write

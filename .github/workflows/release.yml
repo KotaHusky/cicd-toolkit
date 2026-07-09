@@ -33,6 +33,7 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       release-url: ${{ steps.create-release.outputs.release-url }}
     steps:

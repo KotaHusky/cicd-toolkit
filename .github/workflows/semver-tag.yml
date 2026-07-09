@@ -27,6 +27,10 @@ on:
         description: 'Changelog since last tag'
         value: ${{ jobs.tag.outputs.changelog }}
 
+concurrency:
+  group: semver-tag-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 

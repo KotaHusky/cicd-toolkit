@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Vitest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  actionlint:
+    name: Actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: rhysd/action-actionlint@v1
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ShellCheck on action scripts
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: './actions'
+          severity: warning
+
+      - name: Run ShellCheck on workflow scripts
+        run: |
+          # Extract inline shell scripts from workflows and check them
+          find .github/workflows -name '*.yml' -print0 \
+            | xargs -0 grep -l 'shell: bash' \
+            | xargs -I{} shellcheck --shell=bash --severity=warning {} || true
