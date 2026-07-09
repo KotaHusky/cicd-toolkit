@@ -87,7 +87,7 @@ jobs:
     outputs:
       deployed: ${{ steps.deploy.outcome == 'success' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout-ref || github.ref }}
 
@@ -96,7 +96,7 @@ jobs:
           node-version: ${{ inputs.node-version }}
           pre-build-filter: ${{ inputs.pre-build-filter }}
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.role-arn }}
           aws-region: ${{ inputs.aws-region }}

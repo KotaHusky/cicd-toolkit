@@ -44,17 +44,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
 
       - name: Restore node_modules
         id: cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
@@ -67,7 +67,7 @@ jobs:
 
       - name: Save node_modules cache
         if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
@@ -80,15 +80,15 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
 
       - name: Restore node_modules
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
@@ -107,15 +107,15 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
 
       - name: Restore node_modules
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
@@ -134,15 +134,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
 
       - name: Restore node_modules
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
