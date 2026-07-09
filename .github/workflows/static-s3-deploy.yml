@@ -90,6 +90,7 @@ jobs:
   deploy:
     name: Deploy static site
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       invalidation-id: ${{ steps.invalidate.outputs.invalidation-id }}
       objects-uploaded: ${{ steps.sync.outputs.objects-uploaded }}
@@ -169,7 +170,10 @@ jobs:
         id: invalidate
         shell: bash
         run: |
-          # Convert newline- or space-separated input to a quoted, space-joined list
+          # Convert newline- or space-separated input to a space-joined list.
+          # $PATHS is intentionally unquoted so the AWS CLI receives each path
+          # as a separate argument (--paths requires multiple positional args).
+          # shellcheck disable=SC2086
           PATHS=$(echo "${{ inputs.invalidation-paths }}" | tr '\n' ' ')
           INV_ID=$(aws cloudfront create-invalidation \
             --distribution-id "${{ inputs.distribution-id }}" \

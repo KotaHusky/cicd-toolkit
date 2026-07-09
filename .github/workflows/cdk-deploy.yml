@@ -83,6 +83,7 @@ jobs:
   deploy:
     name: CDK Deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     outputs:
       deployed: ${{ steps.deploy.outcome == 'success' }}
     steps:
@@ -111,6 +112,9 @@ jobs:
         shell: bash
         run: |
           CONTEXT_FLAGS=""
+          # Word-splitting is intentional: cdk-context is a space-separated
+          # list of key=value pairs and we want each pair as its own token.
+          # shellcheck disable=SC2086
           for PAIR in ${{ inputs.cdk-context }}; do
             CONTEXT_FLAGS="${CONTEXT_FLAGS} -c ${PAIR}"
           done

@@ -40,8 +40,12 @@ jobs:
         run: |
           CONTEXT_FLAGS=""
           if [ -n "${{ inputs.cdk-context }}" ]; then
+            # Word-splitting is intentional: cdk-context is a space-separated
+            # list of key=value pairs and we want each pair as its own token.
+            # shellcheck disable=SC2086
             for PAIR in ${{ inputs.cdk-context }}; do
               CONTEXT_FLAGS="${CONTEXT_FLAGS} -c ${PAIR}"
             done
           fi
+          # shellcheck disable=SC2086
           npx cdk synth --quiet ${CONTEXT_FLAGS}

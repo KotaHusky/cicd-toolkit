@@ -9,3 +9,7 @@ cdk.out/
 
 .env
 .env.*
+
+# macOS
+.DS_Store
+**/.DS_Store
