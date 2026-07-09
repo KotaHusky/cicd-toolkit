@@ -38,8 +38,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install actionlint
+        run: |
+          bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          sudo mv actionlint /usr/local/bin/
+
       - name: Run actionlint
-        uses: rhysd/action-actionlint@v1
+        run: actionlint -color
 
   shellcheck:
     name: ShellCheck
@@ -48,15 +53,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run ShellCheck on action scripts
+      - name: Run ShellCheck on composite action scripts
         uses: ludeeus/action-shellcheck@2.0.0
         with:
           scandir: './actions'
           severity: warning
-
-      - name: Run ShellCheck on workflow scripts
-        run: |
-          # Extract inline shell scripts from workflows and check them
-          find .github/workflows -name '*.yml' -print0 \
-            | xargs -0 grep -l 'shell: bash' \
-            | xargs -I{} shellcheck --shell=bash --severity=warning {} || true
