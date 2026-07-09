@@ -94,7 +94,7 @@ jobs:
           key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
 
       - name: Turbo remote cache
-        uses: rharkor/caching-for-turbo@v2.2.1
+        uses: rharkor/caching-for-turbo@v2.5.0
 
       - name: Build
         run: npx turbo run build
@@ -121,7 +121,7 @@ jobs:
           key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
 
       - name: Turbo remote cache
-        uses: rharkor/caching-for-turbo@v2.2.1
+        uses: rharkor/caching-for-turbo@v2.5.0
 
       - name: Test
         run: npx turbo run test
@@ -148,7 +148,7 @@ jobs:
           key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
 
       - name: Turbo remote cache
-        uses: rharkor/caching-for-turbo@v2.2.1
+        uses: rharkor/caching-for-turbo@v2.5.0
 
       - name: Lint
         run: npx turbo run lint
