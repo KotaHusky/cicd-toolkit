@@ -44,7 +44,11 @@ jobs:
           sudo mv actionlint /usr/local/bin/
 
       - name: Run actionlint
-        run: actionlint -color
+        # -ignore 'shellcheck' suppresses shellcheck-via-actionlint findings.
+        # Shellcheck runs separately on composite action scripts (./actions/)
+        # where it is more useful. Inline workflow run: scripts contain ${{ }}
+        # expressions that shellcheck cannot parse and flags as noise.
+        run: actionlint -color -ignore 'shellcheck reported issue'
 
   shellcheck:
     name: ShellCheck
