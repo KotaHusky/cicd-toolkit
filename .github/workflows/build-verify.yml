@@ -255,9 +255,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if ! THREADS=$(gh api graphql \
-              -F owner="${{ github.repository_owner }}" \
-              -F repo="${{ github.event.repository.name }}" \
+          set +e
+          THREADS=$(gh api graphql \
+              -f owner="${{ github.repository_owner }}" \
+              -f repo="${{ github.event.repository.name }}" \
               -F pr="${{ github.event.pull_request.number }}" \
               -f query='query($owner: String!, $repo: String!, $pr: Int!) {
                 repository(owner: $owner, name: $repo) {
@@ -265,9 +266,20 @@ jobs:
                     reviewThreads(first: 100) { nodes { isResolved } }
                   }
                 }
-              }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length'); then
-            echo "::notice title=Review threads::Could not query review threads (token likely lacks pull-requests read) — skipping the gate."
-            exit 0
+              }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length' 2>&1)
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            # Fail open ONLY on permission errors (restricted token); fail
+            # closed on anything else (5xx, rate limit) so a consumer who
+            # requires this check never gets false assurance — re-run fixes
+            # transient failures.
+            if echo "$THREADS" | grep -qiE 'resource not accessible|forbidden|permission'; then
+              echo "::notice title=Review threads::Token lacks permission to read review threads — skipping the gate."
+              exit 0
+            fi
+            echo "::error title=Review threads::Could not query review threads (transient error?) — re-run this job. Output: ${THREADS}"
+            exit 1
           fi
           if [ "$THREADS" -gt 0 ]; then
             echo "::error title=Unresolved review threads::${THREADS} review thread(s) are unresolved on this PR. Disposition each — push a fix, or reply explaining why it's dismissed — then resolve it and re-run this check (Re-run failed jobs re-runs only this gate, not the review)."
