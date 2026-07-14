@@ -1,0 +1,35 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    # Skip bot-authored PRs (e.g. dependabot) — nothing useful to review
+    if: github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_sticky_comment: true
+          prompt: |
+            Review this PR. Focus on what matters for a reusable-workflow library
+            that consumers pin at @main (changes ship to all consumers on merge):
+            - correctness bugs in workflow YAML and embedded shell (set -euo pipefail
+              pitfalls, quoting, commands that legitimately exit non-zero)
+            - breaking changes to workflow/action inputs, outputs, or secrets
+            - drift between the change and the README docs or examples/ callers
+            - security issues (secret handling, injection via untrusted inputs)
+          claude_args: "--max-turns 8"
