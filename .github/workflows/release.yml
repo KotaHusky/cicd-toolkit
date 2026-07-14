@@ -452,8 +452,10 @@ jobs:
             > /tmp/denylist.txt
           cat /tmp/denylist-custom.txt >> /tmp/denylist.txt
           # -w: whole-word matching, so short terms (e.g. "AWS") don't
-          # false-positive on substrings ("draws", "flaws").
-          VIOLATIONS=$(grep -i -w -F -f /tmp/denylist.txt "$BODY_FILE" || true)
+          # false-positive on substrings ("draws", "flaws"). Underscores are
+          # word-constituents to grep, so also scan a copy with _ -> space:
+          # client_secret / api_key / ACCESS_TOKEN still hit the gate.
+          VIOLATIONS=$({ cat "$BODY_FILE"; tr '_' ' ' < "$BODY_FILE"; } | grep -i -w -F -f /tmp/denylist.txt || true)
           if [ -n "$VIOLATIONS" ]; then
             echo "::error title=whats-new::Deny-listed term found in the public summary — not publishing. Matches:"
             echo "$VIOLATIONS" >&2
