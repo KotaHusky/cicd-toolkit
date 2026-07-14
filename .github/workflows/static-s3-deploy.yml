@@ -102,7 +102,7 @@ jobs:
         with:
           ref: ${{ inputs.checkout-ref || github.ref }}
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
@@ -131,7 +131,7 @@ jobs:
         shell: bash
         run: ${{ inputs.build-command }}
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.role-arn }}
           aws-region: ${{ inputs.aws-region }}
