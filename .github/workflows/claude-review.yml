@@ -25,6 +25,15 @@ on:
         required: false
         type: string
         default: '25'
+      require-resolved-review-threads:
+        description: >-
+          Add a status check that fails while the PR has unresolved review
+          threads (from Claude or humans), forcing each finding to be
+          dispositioned — fixed or resolved with a reply — before merge.
+          Advisory unless the caller marks the check required.
+        required: false
+        type: boolean
+        default: true
       strict:
         description: >-
           Fail the job when the review cannot run (missing credentials or a
@@ -94,7 +103,7 @@ jobs:
 
       - name: Checkout code
         if: steps.gate.outputs.has-credentials == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -131,3 +140,41 @@ jobs:
         if: steps.gate.outputs.has-credentials == 'true' && steps.review.outcome == 'failure'
         run: |
           echo "::notice title=Claude code review did not complete::The review step failed — see its logs above. The job still passes because strict mode is off; set 'strict: true' to fail the job instead."
+
+  review-threads:
+    # Fails while unresolved review threads exist, so findings must be
+    # dispositioned (fixed, or resolved with a reply saying why) before
+    # merge. Runs after the review so freshly posted threads are counted.
+    # After resolving, use "Re-run failed jobs" — only this gate re-runs.
+    name: Review Threads Resolved
+    needs: review
+    if: >-
+      ${{ always() && inputs.require-resolved-review-threads &&
+          github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check for unresolved review threads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! THREADS=$(gh api graphql \
+              -F owner="${{ github.repository_owner }}" \
+              -F repo="${{ github.event.repository.name }}" \
+              -F pr="${{ github.event.pull_request.number }}" \
+              -f query='query($owner: String!, $repo: String!, $pr: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $pr) {
+                    reviewThreads(first: 100) { nodes { isResolved } }
+                  }
+                }
+              }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length'); then
+            echo "::notice title=Review threads::Could not query review threads (token likely lacks pull-requests read) — skipping the gate."
+            exit 0
+          fi
+          if [ "$THREADS" -gt 0 ]; then
+            echo "::error title=Unresolved review threads::${THREADS} review thread(s) are unresolved on this PR. Disposition each — push a fix, or reply explaining why it's dismissed — then resolve it and re-run this check (Re-run failed jobs re-runs only this gate, not the review)."
+            exit 1
+          fi
+          echo "All review threads resolved (or none exist)."

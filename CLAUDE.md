@@ -61,3 +61,6 @@ consumed by other repos. `examples/` holds copy-paste caller workflows for consu
 - Before starting, check `git worktree list` for conflicts
 - Use conventional commit messages, scoped to the workflow/action/construct touched (e.g. `fix(static-s3-deploy): ...`)
 - After completing work, create a PR — do not merge directly
+- Before merging any PR, disposition every review thread: push a fix, or
+  resolve it with a reply stating why it's dismissed. Never resolve a thread
+  without a reply. The "Review Threads Resolved" check enforces this.

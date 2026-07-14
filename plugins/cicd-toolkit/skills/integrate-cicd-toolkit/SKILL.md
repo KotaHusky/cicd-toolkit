@@ -108,6 +108,15 @@ pbpaste | gh secret set ANTHROPIC_API_KEY -R <owner>/<repo>
 Verify either with `gh secret list -R <owner>/<repo>` — names and timestamps only;
 values are never readable back, which is the point.
 
+## Review-thread discipline
+
+Both review surfaces add a "Review Threads Resolved" status check (input
+`require-resolved-review-threads`, default true): it fails while the PR has
+unresolved review threads. When helping in a consumer repo, disposition each
+finding — push a fix, or resolve the thread with a reply saying why it's
+dismissed — then re-run the failed gate job only. Never resolve without a
+reply.
+
 ## What's-New summaries (end-user release notes)
 
 `release.yml` produces two tiers on every `v*` tag: engineer-focused notes (the
