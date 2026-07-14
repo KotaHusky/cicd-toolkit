@@ -153,9 +153,9 @@ describe('EcsExpressEdgeStack (Cloudflare DNS, no Route53)', () => {
       makeStack({
         observability: { tier: 'prod', alarmEmail: 'ops@kota.dog' },
         loadBalancerFullName: 'app/ecs-express-gateway-alb/abc123',
-        targetGroupFullName: 'targetgroup/homepage-tg/def456',
+        targetGroupFullName: 'targetgroup/example-app-tg/def456',
         ecsClusterName: 'default',
-        ecsServiceName: 'homepage',
+        ecsServiceName: 'example-app',
       }),
     );
     template.resourceCountIs('AWS::CloudWatch::Dashboard', 1);
@@ -183,13 +183,13 @@ describe('EcsExpressEdgeStack (Cloudflare DNS, no Route53)', () => {
 describe('applyTags on EcsExpressEdgeStack', () => {
   test('propagates cost-allocation tags to the distribution', () => {
     const stack = makeStack();
-    applyTags(stack, { Project: 'homepage', Environment: 'prod' });
+    applyTags(stack, { Project: 'example-app', Environment: 'prod' });
     const template = Template.fromStack(stack);
     const dist = Object.values(template.findResources('AWS::CloudFront::Distribution'))[0] as {
       Properties: { Tags?: Array<{ Key: string; Value: string }> };
     };
     const tags = new Map((dist.Properties.Tags ?? []).map((t) => [t.Key, t.Value]));
-    expect(tags.get('Project')).toBe('homepage');
+    expect(tags.get('Project')).toBe('example-app');
     expect(tags.get('Environment')).toBe('prod');
   });
 });

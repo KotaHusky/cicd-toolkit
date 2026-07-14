@@ -18,7 +18,7 @@ on:
   workflow_call:
     inputs:
       app:
-        description: 'App slug = GHCR image name + ECR repo + prod service name (e.g. homepage)'
+        description: 'App slug = GHCR image name + ECR repo + prod service name (e.g. my-app)'
         required: true
         type: string
       stack-prefix:
