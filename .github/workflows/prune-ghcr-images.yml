@@ -1,0 +1,49 @@
+name: Prune GHCR Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Container package name to prune'
+        required: true
+        type: string
+      keep:
+        description: 'Number of most recent versions to keep'
+        required: false
+        type: string
+        default: '10'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prune old container versions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE: ${{ inputs.package }}
+          KEEP: ${{ inputs.keep }}
+        run: |
+          set -euo pipefail
+
+          # Fetch existing versions
+          versions=$(curl -sv -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/user/packages/container/${PACKAGE}/versions?per_page=100")
+
+          total=$(echo "${versions}" | jq length)
+          echo "Found ${total} versions of ${PACKAGE}"
+
+          tagged=$(echo "${versions}" | jq -r '.[] | select(.metadata.container.tags | length > 0) | .id' | grep -c .)
+          echo "Tagged versions: ${tagged}"
+
+          # Delete everything beyond the newest $KEEP
+          echo "${versions}" | jq -r ".[${KEEP}:] | .[].id" | while read -r id; do
+            curl -s -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" \
+              "https://api.github.com/user/packages/container/${PACKAGE}/versions/${id}"
+            echo "Deleted version ${id}"
+          done
