@@ -23,6 +23,7 @@ describe('OidcBootstrapStack', () => {
         repo: 'repo-b',
         roleName: 'RepoBDeployRole',
         branch: 'develop',
+        directDeployResourceOps: true,
         policies: [
           new iam.PolicyStatement({
             actions: ['lambda:InvokeFunction'],
@@ -53,6 +54,39 @@ describe('OidcBootstrapStack', () => {
     template.hasResourceProperties('AWS::IAM::Role', {
       RoleName: 'RepoBDeployRole',
     });
+  });
+
+  test('every role gets account-scoped cloudformation:ListStacks', () => {
+    const policies = template.findResources('AWS::IAM::Policy');
+    const rolesWithListStacks = Object.values(policies).filter(p =>
+      JSON.stringify(p.Properties.PolicyDocument.Statement).includes('cloudformation:ListStacks'),
+    );
+    expect(rolesWithListStacks.length).toBe(2);
+    for (const policy of rolesWithListStacks) {
+      const stmt = policy.Properties.PolicyDocument.Statement.find(
+        (s: { Action: string | string[] }) => s.Action === 'cloudformation:ListStacks',
+      );
+      expect(stmt.Resource).toBe('*');
+    }
+  });
+
+  test('directDeployResourceOps grants Cloud Control resource ops only where opted in', () => {
+    const policies = template.findResources('AWS::IAM::Policy');
+    const withDirectOps = Object.values(policies).filter(p =>
+      JSON.stringify(p.Properties.PolicyDocument.Statement).includes('CdkDirectDeployResourceOps'),
+    );
+    expect(withDirectOps.length).toBe(1);
+    const stmt = withDirectOps[0].Properties.PolicyDocument.Statement.find(
+      (s: { Sid?: string }) => s.Sid === 'CdkDirectDeployResourceOps',
+    );
+    expect(stmt.Action).toEqual([
+      'cloudformation:CreateResource',
+      'cloudformation:UpdateResource',
+      'cloudformation:DeleteResource',
+      'cloudformation:GetResource',
+      'cloudformation:ListResources',
+    ]);
+    expect(stmt.Resource).toBe('arn:aws:cloudformation:*:*:resource/*');
   });
 
   test('outputs role ARNs', () => {

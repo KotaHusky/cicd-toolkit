@@ -332,6 +332,8 @@ npx cdk deploy --app "npx ts-node bin/bootstrap.ts"
 
 This creates an IAM OIDC Provider for `token.actions.githubusercontent.com` and an IAM Role trusted by your GitHub org/repo. Store the role ARN as `AWS_DEPLOY_ROLE_ARN` in your repo secrets.
 
+Every role the stack creates automatically gets `sts:AssumeRole` on the `cdk-*` bootstrap roles and account-scoped `cloudformation:ListStacks` (ListStacks doesn't support resource-level permissions — scoping it to stack ARNs silently denies it and CDK's rollback-detection pre-check logs `AccessDenied` on every deploy). Roles that deploy with `cdk deploy --method=direct` should also set `directDeployResourceOps: true` to get the Cloud Control API resource actions that mode requires.
+
 ## CDK constructs
 
 Reusable, project-agnostic constructs in [`lib/`](lib/). Import them into your own CDK app.
