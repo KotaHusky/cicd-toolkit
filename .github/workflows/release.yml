@@ -60,7 +60,6 @@ jobs:
     timeout-minutes: 10
     outputs:
       release-url: ${{ steps.create-release.outputs.release-url }}
-      previous-tag: ${{ steps.changelog.outputs.previous-tag }}
     steps:
       - name: Harden runner (egress audit)
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2
@@ -100,7 +99,6 @@ jobs:
 
           # Find the previous semver tag (skip the current one)
           PREVIOUS_TAG=$(git tag --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -n 1 || true)
-          echo "previous-tag=${PREVIOUS_TAG}" >> "$GITHUB_OUTPUT"
 
           if [ -n "$PREVIOUS_TAG" ]; then
             echo "Previous tag: ${PREVIOUS_TAG}"
@@ -448,9 +446,14 @@ jobs:
           fi
           jq -e '.title and .summary and (.highlights | type == "array")' "$BODY_FILE" > /dev/null             || { echo "::error title=whats-new::Generated summary is not valid JSON with title/summary/highlights"; cat "$BODY_FILE" >&2; exit 1; }
 
-          printf '%s\n' "secret" "token" "api key" "apikey" "password" "credential" > /tmp/denylist.txt
+          printf '%s\n' \
+            "secret" "secrets" "token" "tokens" "api key" "api keys" \
+            "apikey" "apikeys" "password" "passwords" "credential" "credentials" \
+            > /tmp/denylist.txt
           cat /tmp/denylist-custom.txt >> /tmp/denylist.txt
-          VIOLATIONS=$(grep -i -F -f /tmp/denylist.txt "$BODY_FILE" || true)
+          # -w: whole-word matching, so short terms (e.g. "AWS") don't
+          # false-positive on substrings ("draws", "flaws").
+          VIOLATIONS=$(grep -i -w -F -f /tmp/denylist.txt "$BODY_FILE" || true)
           if [ -n "$VIOLATIONS" ]; then
             echo "::error title=whats-new::Deny-listed term found in the public summary — not publishing. Matches:"
             echo "$VIOLATIONS" >&2
@@ -466,7 +469,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ github.ref_name }}"
-          PREV_TAG="${{ needs.release.outputs.previous-tag }}"
 
           if [ "${{ inputs.auto-publish }}" != "true" ]; then
             cp /tmp/whats-new.json /tmp/whats-new.draft.json

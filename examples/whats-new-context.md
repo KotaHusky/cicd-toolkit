@@ -36,10 +36,11 @@ use these words.>
 
 <!--
   One term per line. Publishing FAILS (mechanically, case-insensitive
-  substring match) if any of these appear in the public summary. Add your
+  WHOLE-WORD match) if any of these appear in the public summary. Add your
   internal service names, cloud providers, and anything else that must
-  never leak. A few defaults (secret, token, api key, password, credential)
-  are always enforced by the workflow.
+  never leak. Prefer specific terms — very generic words will block
+  legitimate summaries. A few defaults (secret, token, api key, password,
+  credential) are always enforced by the workflow.
 -->
 
 - internal
