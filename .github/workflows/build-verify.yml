@@ -35,6 +35,14 @@ on:
         required: false
         type: boolean
         default: true
+      require-resolved-review-threads:
+        description: >-
+          Add a status check that fails while the PR has unresolved review
+          threads, forcing findings to be dispositioned before merge.
+          Advisory unless the caller marks the check required.
+        required: false
+        type: boolean
+        default: true
       claude-review-prompt:
         description: 'Extra project-specific review instructions appended to the default review prompt'
         required: false
@@ -195,7 +203,7 @@ jobs:
             echo "has-credentials=true" >> "$GITHUB_OUTPUT"
           else
             echo "has-credentials=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Claude review skipped::No ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN secret reached build-verify. Pass one via 'secrets:' (or use 'secrets: inherit') to enable AI review, or set 'claude-review: false' to silence this notice."
+            echo "::notice title=Claude review skipped::No ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN secret reached build-verify. Pass one via 'secrets:' (or 'secrets: inherit') to enable AI review, or set 'claude-review: false' to silence this notice. Note: PRs from forks never receive secrets, so this is expected there."
           fi
 
       - name: Checkout code
@@ -228,3 +236,58 @@ jobs:
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
             --max-turns 25
+
+  review-threads:
+    # See claude-review.yml's twin job: dispositions review findings before
+    # merge. Ordered after the embedded review so its threads are counted;
+    # "Re-run failed jobs" re-runs only this gate after resolving.
+    name: Review Threads Resolved
+    needs: claude-review
+    if: >-
+      ${{ always() && inputs.require-resolved-review-threads &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.user.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check for unresolved review threads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          set +e
+          # --paginate + --slurp walks all pages, so >100 threads can't
+          # silently false-pass the gate.
+          THREADS=$(gh api graphql --paginate --slurp \
+              -f owner="${{ github.repository_owner }}" \
+              -f repo="${{ github.event.repository.name }}" \
+              -F pr="${{ github.event.pull_request.number }}" \
+              -f query='query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $pr) {
+                    reviewThreads(first: 100, after: $endCursor) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes { isResolved }
+                    }
+                  }
+                }
+              }' --jq '[.[].data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length' 2>&1)
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            # Fail open ONLY on permission errors (restricted token); fail
+            # closed on anything else (5xx, rate limit) so a consumer who
+            # requires this check never gets false assurance — re-run fixes
+            # transient failures.
+            if echo "$THREADS" | grep -qiE 'resource not accessible|forbidden|permission'; then
+              echo "::notice title=Review threads::Token lacks permission to read review threads — skipping the gate. Grant the calling job pull-requests: read (or write) to enable it."
+              exit 0
+            fi
+            echo "::error title=Review threads::Could not query review threads (transient error?) — re-run this job. Output: ${THREADS}"
+            exit 1
+          fi
+          if [ "$THREADS" -gt 0 ]; then
+            echo "::error title=Unresolved review threads::${THREADS} review thread(s) are unresolved on this PR. Disposition each — push a fix, or reply explaining why it's dismissed — then resolve it and re-run this check (Re-run failed jobs re-runs only this gate, not the review)."
+            exit 1
+          fi
+          echo "All review threads resolved (or none exist)."

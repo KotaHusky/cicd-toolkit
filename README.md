@@ -33,6 +33,7 @@ jobs:
 | `package-manager` | string | `npm` | Package manager (`npm` or `pnpm`) |
 | `claude-review` | boolean | `true` | Advisory Claude AI review on PRs; activates only when an Anthropic secret is passed |
 | `claude-review-prompt` | string | `''` | Extra project-specific review instructions |
+| `require-resolved-review-threads` | boolean | `true` | Status check that fails while the PR has unresolved review threads — findings must be fixed or resolved-with-a-reply before merge. Needs `pull-requests: read` on the caller (no-ops with a notice otherwise). Don't mark it a *required* branch check unless every PR runs it: skipped paths (bot PRs, `push` events, opt-out) leave a required check stuck on "Expected" |
 
 **Built-in Claude review:** when the caller passes `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` (directly or via `secrets: inherit`), pull requests get an advisory AI review (inline comments + sticky summary) with no extra workflow file. It never blocks CI: no credentials → skip with a notice; insufficient permissions → the review step is swallowed. For comments to post, grant the calling job `pull-requests: write` (see [Claude Code Review](#claude-code-review) for the standalone workflow and full permission block). Requires the [Claude GitHub App](https://github.com/apps/claude) on the repo. Set `claude-review: false` to opt out.
 
@@ -283,6 +284,7 @@ To source the key from a GitHub environment in the consuming repo instead of a r
 | `review-prompt` | string | `''` | Extra project-specific review instructions |
 | `max-turns` | string | `25` | Max agent turns per review (cost control) |
 | `strict` | boolean | `false` | Fail the job when the review can't run (missing credentials or a review error); default is a notice annotation and a passing job |
+| `require-resolved-review-threads` | boolean | `true` | Status check ("Review Threads Resolved") that fails while the PR has unresolved review threads — disposition each finding (fix, or resolve with a reply saying why) then re-run the failed gate job. Needs `pull-requests: read`; skips bot PRs. Don't mark it a *required* branch check unless every PR runs it — skipped paths leave a required check stuck on "Expected" |
 
 | Secret | Required | Description |
 |--------|----------|-------------|
