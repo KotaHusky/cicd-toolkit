@@ -161,17 +161,22 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          THREADS=$(gh api graphql \
+          # --paginate + --slurp walks all pages, so >100 threads can't
+          # silently false-pass the gate.
+          THREADS=$(gh api graphql --paginate --slurp \
               -f owner="${{ github.repository_owner }}" \
               -f repo="${{ github.event.repository.name }}" \
               -F pr="${{ github.event.pull_request.number }}" \
-              -f query='query($owner: String!, $repo: String!, $pr: Int!) {
+              -f query='query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
                 repository(owner: $owner, name: $repo) {
                   pullRequest(number: $pr) {
-                    reviewThreads(first: 100) { nodes { isResolved } }
+                    reviewThreads(first: 100, after: $endCursor) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes { isResolved }
+                    }
                   }
                 }
-              }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length' 2>&1)
+              }' --jq '[.[].data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length' 2>&1)
           STATUS=$?
           set -e
           if [ "$STATUS" -ne 0 ]; then
@@ -180,7 +185,7 @@ jobs:
             # requires this check never gets false assurance — re-run fixes
             # transient failures.
             if echo "$THREADS" | grep -qiE 'resource not accessible|forbidden|permission'; then
-              echo "::notice title=Review threads::Token lacks permission to read review threads — skipping the gate."
+              echo "::notice title=Review threads::Token lacks permission to read review threads — skipping the gate. Grant the calling job pull-requests: read (or write) to enable it."
               exit 0
             fi
             echo "::error title=Review threads::Could not query review threads (transient error?) — re-run this job. Output: ${THREADS}"
