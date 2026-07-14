@@ -446,7 +446,10 @@ jobs:
           fi
           jq -e '.title and .summary and (.highlights | type == "array")' "$BODY_FILE" > /dev/null             || { echo "::error title=whats-new::Generated summary is not valid JSON with title/summary/highlights"; cat "$BODY_FILE" >&2; exit 1; }
 
-          printf '%s\n' "secret" "token" "api key" "apikey" "password" "credential" > /tmp/denylist.txt
+          printf '%s\n' \
+            "secret" "secrets" "token" "tokens" "api key" "api keys" \
+            "apikey" "apikeys" "password" "passwords" "credential" "credentials" \
+            > /tmp/denylist.txt
           cat /tmp/denylist-custom.txt >> /tmp/denylist.txt
           # -w: whole-word matching, so short terms (e.g. "AWS") don't
           # false-positive on substrings ("draws", "flaws").

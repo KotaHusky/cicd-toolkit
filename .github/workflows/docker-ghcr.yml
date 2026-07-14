@@ -46,10 +46,11 @@ on:
         default: 'mode=max'
       whats-new-path:
         description: >-
-          Bake the latest release's whats-new.json into the build context at
-          this path (relative to repo root, e.g. public/whats-new.json) before
-          the image is built. Empty disables. See the What's-New section of
-          the README.
+          Bake a whats-new.json into the build context at this path (relative
+          to repo root, e.g. public/whats-new.json) before the image is built.
+          Prefers the release matching the version input; falls back to the
+          latest release. Empty disables. See the What's-New section of the
+          README.
         required: false
         type: string
         default: ''
