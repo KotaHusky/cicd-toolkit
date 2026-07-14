@@ -16,8 +16,23 @@ jobs:
 
   verify:
     uses: KotaHusky/cicd-toolkit/.github/workflows/build-verify.yml@main
+    # Permissions enable the built-in advisory Claude review to post PR
+    # comments. The review activates only when an Anthropic secret is passed
+    # below; without one it skips silently and these grants are harmless.
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+      actions: read
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # pay-per-token alternative
     with:
       node-version: '24'
+      # claude-review: false          # opt out of the AI review
+      # claude-review-prompt: |       # project-specific review focus
+      #   Pay extra attention to src/api/.
       # run-build: false   # skip build step
       # run-tests: false   # skip test step
       # run-lint: false    # skip lint step

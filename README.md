@@ -31,6 +31,24 @@ jobs:
 | `run-tests` | boolean | `true` | Run the test step |
 | `run-lint` | boolean | `true` | Run the lint step |
 | `package-manager` | string | `npm` | Package manager (`npm` or `pnpm`) |
+| `claude-review` | boolean | `true` | Advisory Claude AI review on PRs; activates only when an Anthropic secret is passed |
+| `claude-review-prompt` | string | `''` | Extra project-specific review instructions |
+
+**Built-in Claude review:** when the caller passes `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` (directly or via `secrets: inherit`), pull requests get an advisory AI review (inline comments + sticky summary) with no extra workflow file. It never blocks CI: no credentials → skip with a notice; insufficient permissions → the review step is swallowed. For comments to post, grant the calling job `pull-requests: write` (see [Claude Code Review](#claude-code-review) for the standalone workflow and full permission block). Requires the [Claude GitHub App](https://github.com/apps/claude) on the repo. Set `claude-review: false` to opt out.
+
+```yaml
+jobs:
+  verify:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/build-verify.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+      actions: read
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
 
 ### Commitlint
 
