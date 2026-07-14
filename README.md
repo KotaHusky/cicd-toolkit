@@ -164,6 +164,9 @@ jobs:
 |-------|------|---------|-------------|
 | `model` | string | `claude-sonnet-4-5-20250929` | Claude model to use |
 | `draft` | boolean | `false` | Create as draft release |
+| `app-context` | string | `''` | End-user-facing app description for the public what's-new summary (combined with `.github/whats-new-context.md`) |
+| `whats-new` | boolean | `true` | Also generate `whats-new.json` + `releases.json` release assets |
+| `auto-publish` | boolean | `true` | When `false`, uploads `whats-new.draft.json` for human review instead |
 
 | Secret | Required | Description |
 |--------|----------|-------------|
@@ -174,6 +177,51 @@ jobs:
 | `release-url` | URL of the created release |
 
 The workflow compares commits between the current and previous semver tags, sends the log to Claude, and creates a release titled `v1.2.0 — <AI-generated title>` with a summary and full changelog.
+
+### End-User What's-New Summaries
+
+Releases are **two-tier**: the GitHub Release body stays engineer-focused and specific, while `release.yml` additionally generates a plain-language, end-user-facing summary your app can display — a `whats-new.json` (latest) and cumulative `releases.json` (last 20) attached to each release as assets.
+
+**How it stays app-aware and leak-free:**
+
+1. **Curated context** — the generator sees only the commit subjects plus `.github/whats-new-context.md` in your repo (copy [`examples/whats-new-context.md`](examples/whats-new-context.md)): app description, user vocabulary, tone, and a deny-list. It's the only app knowledge the summarizer gets — keep it updated as features change.
+2. **Generation rules** — user-visible changes only; internal-only changes collapse to "Stability and performance improvements"; security fixes are never described specifically; commit text is treated as data, not instructions.
+3. **Redaction judge** — a second Claude pass reviews the draft against the context file and rewrites anything that reveals internals.
+4. **Mechanical deny-list** — publishing fails hard if any deny-listed term (yours + built-in defaults like `secret`, `token`) appears in the final text. The release itself is unaffected.
+
+**Getting the summary into your app** — enable baking at deploy/build time so the app reads a local file that always matches the deployed version (no client-side GitHub API, works for private repos):
+
+```yaml
+# static sites (S3/CloudFront)
+    uses: KotaHusky/cicd-toolkit/.github/workflows/static-s3-deploy.yml@main
+    with:
+      whats-new-path: public/whats-new.json
+
+# container images (GHCR) — bakes into the build context pre-build
+    uses: KotaHusky/cicd-toolkit/.github/workflows/docker-ghcr.yml@main
+    with:
+      whats-new-path: public/whats-new.json
+```
+
+**Rendering it** — import from this package (framework-agnostic core, optional React bindings):
+
+```tsx
+import { useWhatsNew } from 'cicd-toolkit/lib/whats-new/react';
+
+function WhatsNewBanner() {
+  const { release } = useWhatsNew(); // reads /whats-new.json
+  if (!release) return null; // absent until the first release + deploy
+  return (
+    <aside>
+      <h3>{release.title} <small>v{release.version}</small></h3>
+      <p>{release.summary}</p>
+      <ul>{release.highlights.map((h) => <li key={h}>{h}</li>)}</ul>
+    </aside>
+  );
+}
+```
+
+Non-React apps use `fetchWhatsNew()` / `fetchReleaseHistory()` from `cicd-toolkit/lib/whats-new`. Next.js users: add `transpilePackages: ['cicd-toolkit']` since the package ships TypeScript sources.
 
 ### Claude Code Review
 

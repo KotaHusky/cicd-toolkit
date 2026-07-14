@@ -36,6 +36,7 @@ Adapt the example rather than authoring a caller from scratch.
 | GitHub Release with AI-generated notes on `v*` tag | `release.yml` |
 | Claude AI review on every PR (inline + sticky summary) | `claude-review.yml` — needs the [Claude GitHub App](https://github.com/apps/claude) installed and `ANTHROPIC_API_KEY` **or** `CLAUDE_CODE_OAUTH_TOKEN`; advisory by default (never blocks CI), `strict: true` to enforce |
 | Semver tag automation | `semver-tag.yml` |
+| End-user "what's new" panel in the app | `release.yml` (whats-new assets) + `whats-new-path` input on `static-s3-deploy.yml`/`docker-ghcr.yml` + `cicd-toolkit/lib/whats-new` — see the What's-New section below |
 | Azure Container Apps | `aca-provision.yml`, `aca-deploy.yml` |
 | Cloudflare DNS management | `cloudflare-dns.yml` |
 
@@ -102,6 +103,39 @@ pbpaste | gh secret set ANTHROPIC_API_KEY -R <owner>/<repo>
 
 Verify either with `gh secret list -R <owner>/<repo>` — names and timestamps only;
 values are never readable back, which is the point.
+
+## What's-New summaries (end-user release notes)
+
+`release.yml` produces two tiers on every `v*` tag: engineer-focused notes (the
+GitHub Release body) and a public, end-user-facing `whats-new.json` +
+`releases.json` (release assets) generated from a curated context file,
+sanitized by a redaction judge, and gated by a deny-list.
+
+**When wiring this up in a consumer repo:**
+
+1. Create `.github/whats-new-context.md` from the toolkit's
+   `examples/whats-new-context.md`. Interview the user for: what the app is
+   and who uses it, feature names exactly as the UI shows them, tone, and
+   internal names for the deny-list. This file is the ONLY app knowledge the
+   public summarizer receives.
+2. Enable baking: set `whats-new-path: public/whats-new.json` (or equivalent)
+   on the repo's `static-s3-deploy.yml` or `docker-ghcr.yml` caller.
+3. Render it: `useWhatsNew()` from `cicd-toolkit/lib/whats-new/react` (or
+   `fetchWhatsNew()` from `cicd-toolkit/lib/whats-new` without React). Handle
+   `null` — the file is absent until the first release + deploy.
+
+**Maintenance (mandatory, ongoing):** `.github/whats-new-context.md` is a
+living document. Whenever a change in the consumer repo adds, renames, or
+removes a user-facing feature — or changes user-visible vocabulary — update
+the context file **in the same PR**, exactly like README drift. A stale
+context file produces generic or wrong public summaries. When reviewing or
+implementing feature work in a repo that has this file, check it for drift
+before finishing.
+
+**Safety rules for the context file:** everything in it can influence public
+text. Never add internal service names, architecture, dependencies, or
+secrets — internal names belong only under its `## Deny-list` heading, which
+blocks publication if they ever appear in a summary.
 
 ## Gotchas
 
