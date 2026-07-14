@@ -17,7 +17,6 @@ consumed by other repos. `examples/` holds copy-paste caller workflows for consu
 ## CDK Library & Releases
 - No barrel `lib/index.ts` — consumers deep-import from `lib/constructs/*` and
   `lib/stacks/*`. Don't add one.
-- No lockfile is committed, by design — don't add `package-lock.json`.
 - Pushing a `v*` tag triggers `release.yml`, which calls the Anthropic API
   (`ANTHROPIC_API_KEY` secret) to generate release notes. Only tag when cutting a release.
 

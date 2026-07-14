@@ -288,7 +288,8 @@ jobs:
 
           # Custom deny-list: lines under a '## Deny-list' heading in the context file
           if [ -f "${CONTEXT_FILE}" ]; then
-            awk '/^## Deny-list/{flag=1;next}/^## /{flag=0}flag' "${CONTEXT_FILE}"               | sed -e 's/^- //' -e 's/^[[:space:]]*//' -e '/^$/d' -e '/^<!--/d' > /tmp/denylist-custom.txt
+            awk '/^## Deny-list/{flag=1;next}/^## /{flag=0}flag' "${CONTEXT_FILE}" \
+              | { grep -E '^- ' || true; } | sed 's/^- *//' > /tmp/denylist-custom.txt
           else
             : > /tmp/denylist-custom.txt
           fi
@@ -466,8 +467,19 @@ jobs:
 
           gh release upload "$TAG" /tmp/whats-new.json --clobber
 
-          # Cumulative history: prepend to the previous release's releases.json (cap 20)
-          if [ -n "$PREV_TAG" ] && gh release download "$PREV_TAG" --pattern 'releases.json' --output /tmp/releases-prev.json 2>/dev/null; then
+          # Cumulative history: prepend to the most recent prior release that
+          # has a releases.json (not just the immediately previous tag, which
+          # may lack one after an auto-publish:false release or a gap), cap 20.
+          FOUND_PREV=""
+          for CANDIDATE in $(gh release list --limit 10 --json tagName --jq '.[].tagName'); do
+            [ "$CANDIDATE" = "$TAG" ] && continue
+            if gh release download "$CANDIDATE" --pattern 'releases.json' --output /tmp/releases-prev.json 2>/dev/null; then
+              FOUND_PREV="$CANDIDATE"
+              break
+            fi
+          done
+          if [ -n "$FOUND_PREV" ]; then
+            echo "Extending history from ${FOUND_PREV}"
             jq --slurpfile new /tmp/whats-new.json '([$new[0]] + .) | .[:20]' /tmp/releases-prev.json > /tmp/releases.json
           else
             jq -s '.' /tmp/whats-new.json > /tmp/releases.json
