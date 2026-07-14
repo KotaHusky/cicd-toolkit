@@ -126,12 +126,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "${TARGET}")"
-          # Prefer the summary of the exact version being built (when the
-          # version input is set) so rollbacks/redeploys of older refs don't
-          # bake a newer release's summary; fall back to the latest release.
-          if [ -n "${{ inputs.version }}" ] && gh release download "v${{ inputs.version }}" --repo "${{ github.repository }}" --pattern 'whats-new.json' --output "${TARGET}" --clobber 2>/dev/null; then
-            echo "Injected what's-new summary for v${{ inputs.version }} at ${TARGET}"
-          elif gh release download --repo "${{ github.repository }}" --pattern 'whats-new.json' --output "${TARGET}" --clobber 2>/dev/null; then
+          # When a version is being built, bake ONLY that version's summary —
+          # never fall back to latest, which would give an older ref a newer
+          # release's notes (the rollback case). Latest is used only for
+          # unversioned builds.
+          if [ -n "${{ inputs.version }}" ]; then
+            if gh release download "v${{ inputs.version }}" --repo "${{ github.repository }}" --pattern 'whats-new.json' --output "${TARGET}" --clobber; then
+              echo "Injected what's-new summary for v${{ inputs.version }} at ${TARGET}"
+            else
+              echo "::notice title=whats-new::No whats-new.json for v${{ inputs.version }} (release missing, or cut before this feature) — skipping injection rather than baking a mismatched summary."
+            fi
+          elif gh release download --repo "${{ github.repository }}" --pattern 'whats-new.json' --output "${TARGET}" --clobber; then
             echo "Injected what's-new summary (latest release) at ${TARGET}"
           else
             echo "::notice title=whats-new::No whats-new.json asset found (note: drafts/prereleases are not considered) — skipping injection. The app should handle the file being absent."
