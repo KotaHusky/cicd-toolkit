@@ -75,7 +75,7 @@ on:
         type: string
         default: '0'
       prod-additional-aliases:
-        description: 'Extra prod domains served by the same distribution (comma-separated, e.g. www.kota.dog). They are 301-redirected to the primary domain. Require coverage by prod-cert-arn (SAN). Prod only.'
+        description: 'Extra prod domains served by the same distribution (comma-separated, e.g. www.example.com). They are 301-redirected to the primary domain. Require coverage by prod-cert-arn (SAN). Prod only.'
         required: false
         type: string
         default: ''

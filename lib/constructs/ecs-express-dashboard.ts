@@ -55,7 +55,7 @@ export class EcsExpressDashboard extends Construct {
     const period = props.period ?? Duration.minutes(5);
 
     // Dashboard names allow only alphanumerics, dash and underscore — sanitize
-    // since serviceName often defaults to a domain (e.g. 'kota.dog').
+    // since serviceName often defaults to a domain (e.g. 'example.com').
     const rawName = props.dashboardName ?? `${props.serviceName}-ecs-express`;
     const dashboardName = rawName.replace(/[^A-Za-z0-9_-]/g, '-');
 

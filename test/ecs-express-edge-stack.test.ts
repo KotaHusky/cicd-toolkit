@@ -12,7 +12,7 @@ function makeStack(overrides: Partial<ConstructorParameters<typeof EcsExpressEdg
   return new EcsExpressEdgeStack(app, 'TestEdge', {
     env: ENV,
     albDnsName: ENDPOINT,
-    domainName: 'kota.dog',
+    domainName: 'example.com',
     ...overrides,
   });
 }
@@ -22,7 +22,7 @@ describe('EcsExpressEdgeStack (Cloudflare DNS, no Route53)', () => {
     const template = Template.fromStack(makeStack());
     template.resourceCountIs('AWS::CloudFront::Distribution', 1);
     template.hasResourceProperties('AWS::CloudFront::Distribution', {
-      DistributionConfig: Match.objectLike({ Aliases: Match.arrayWith(['kota.dog']) }),
+      DistributionConfig: Match.objectLike({ Aliases: Match.arrayWith(['example.com']) }),
     });
   });
 
@@ -71,7 +71,7 @@ describe('EcsExpressEdgeStack (Cloudflare DNS, no Route53)', () => {
     const template = Template.fromStack(makeStack());
     template.resourceCountIs('AWS::CertificateManager::Certificate', 1);
     template.hasResourceProperties('AWS::CertificateManager::Certificate', {
-      DomainName: 'kota.dog',
+      DomainName: 'example.com',
       ValidationMethod: 'DNS',
     });
   });
@@ -84,14 +84,14 @@ describe('EcsExpressEdgeStack (Cloudflare DNS, no Route53)', () => {
     );
     template.resourceCountIs('AWS::CertificateManager::Certificate', 0);
     template.hasResourceProperties('AWS::CloudFront::Distribution', {
-      DistributionConfig: Match.objectLike({ Aliases: Match.arrayWith(['kota.dog']) }),
+      DistributionConfig: Match.objectLike({ Aliases: Match.arrayWith(['example.com']) }),
     });
   });
 
   test('additionalAliases: extra alias + a 301 redirect CloudFront function', () => {
-    const template = Template.fromStack(makeStack({ additionalAliases: ['www.kota.dog'] }));
+    const template = Template.fromStack(makeStack({ additionalAliases: ['www.example.com'] }));
     template.hasResourceProperties('AWS::CloudFront::Distribution', {
-      DistributionConfig: Match.objectLike({ Aliases: Match.arrayWith(['kota.dog', 'www.kota.dog']) }),
+      DistributionConfig: Match.objectLike({ Aliases: Match.arrayWith(['example.com', 'www.example.com']) }),
     });
     template.resourceCountIs('AWS::CloudFront::Function', 1);
     const fn = Object.values(template.findResources('AWS::CloudFront::Function'))[0] as {
@@ -151,7 +151,7 @@ describe('EcsExpressEdgeStack (Cloudflare DNS, no Route53)', () => {
   test('prod tier: dashboard + alarms + SNS + CloudFront access logs', () => {
     const template = Template.fromStack(
       makeStack({
-        observability: { tier: 'prod', alarmEmail: 'ops@kota.dog' },
+        observability: { tier: 'prod', alarmEmail: 'ops@example.com' },
         loadBalancerFullName: 'app/ecs-express-gateway-alb/abc123',
         targetGroupFullName: 'targetgroup/example-app-tg/def456',
         ecsClusterName: 'default',
