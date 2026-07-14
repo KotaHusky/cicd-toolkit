@@ -1,0 +1,32 @@
+name: Claude PR Review (self)
+
+# Dogfoods this repo's own reusable claude-review.yml on every PR.
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+
+jobs:
+  review:
+    # Skip bot-authored PRs (e.g. dependabot) — nothing useful to review,
+    # and secrets aren't exposed to bot-triggered runs anyway.
+    if: github.event.pull_request.user.type != 'Bot'
+    uses: ./.github/workflows/claude-review.yml
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+      actions: read
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    with:
+      max-turns: '15'
+      review-prompt: |
+        This repo is a reusable-workflow library that consumers pin at @main,
+        so changes ship to all consumers on merge. Weight these heavily:
+        - correctness bugs in workflow YAML and embedded shell (set -euo pipefail
+          pitfalls, quoting, commands that legitimately exit non-zero)
+        - breaking changes to workflow/action inputs, outputs, or secrets
+        - drift between the change and the README docs, examples/ callers, or
+          the plugins/cicd-toolkit skills
