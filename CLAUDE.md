@@ -28,8 +28,9 @@ consumed by other repos. `examples/` holds copy-paste caller workflows for consu
   guidance consumer repos' agents receive.
 - Every PR is auto-reviewed by `claude-review.yml` (posts one sticky comment;
   requires the `CLAUDE_CODE_OAUTH_TOKEN` secret, generated via `claude setup-token`).
-- Secrets are set via clipboard pipe, never pasted into chat or composed into
-  commands: user runs `! pbpaste | gh secret set <NAME> -R KotaHusky/cicd-toolkit`.
+- Secrets never touch a Claude session — not pasted into chat, not composed into
+  commands, not run via the `!` prefix. The user runs
+  `pbpaste | gh secret set <NAME> -R KotaHusky/cicd-toolkit` in their own terminal.
 
 ## Git Worktree Rules (MANDATORY)
 - **NEVER work directly on `main`**. Always create a feature branch.

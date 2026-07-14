@@ -14,7 +14,7 @@ description: One-time AWS setup so a GitHub repo can deploy via cicd-toolkit's A
 ## Procedure
 
 1. Clone (or work from) `KotaHusky/cicd-toolkit`. Read `bin/bootstrap.ts` first — the org name and per-repo role/policy configuration live there; confirm the target org/repos with the user before deploying.
-2. Confirm AWS credentials for the *target account* are active locally (`aws sts get-caller-identity`). If not, the user must authenticate first (e.g. `! aws sso login`).
+2. Confirm AWS credentials for the *target account* are active locally (`aws sts get-caller-identity`). If not, the user must authenticate first in their own terminal (e.g. `aws sso login` — it's interactive browser auth, so it won't run under a session shell).
 3. Deploy the bootstrap stack:
 
    ```sh
@@ -22,13 +22,14 @@ description: One-time AWS setup so a GitHub repo can deploy via cicd-toolkit's A
    ```
 
 4. Capture the role ARN from the stack outputs.
-5. Store it in the consumer repo **without pasting it into chat** — have the user copy the ARN and run:
+5. Store it in the consumer repo **without pasting it into chat** — have the user copy the ARN and run, in their own terminal outside the Claude session:
 
-   ```
-   ! pbpaste | gh secret set AWS_DEPLOY_ROLE_ARN -R <owner>/<repo>
+   ```sh
+   # user's own terminal — not inside the Claude session
+   pbpaste | gh secret set AWS_DEPLOY_ROLE_ARN -R <owner>/<repo>
    ```
 
-   (Role ARNs are only mildly sensitive, but use the same pipe habit as for real secrets.)
+   (Role ARNs are only mildly sensitive, but keep the same out-of-session habit as for real secrets.)
 
 6. Verify: trigger the consumer's deploy workflow and confirm the `Configure AWS credentials` step assumes the role successfully.
 

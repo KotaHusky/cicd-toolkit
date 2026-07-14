@@ -60,40 +60,44 @@ Determine which secrets the chosen workflow needs (from the fetched README). Com
 - `TURBO_TOKEN` / `TURBO_TEAM` — optional, Turbo remote cache.
 - `NODE_AUTH_TOKEN` — optional, private GitHub Packages during builds.
 
-**Handoff procedure (mandatory):** never ask the user to paste a secret into chat, and never echo one into a command you compose. Instead, have the user copy the value (from the Anthropic Console, AWS output, etc.) and run this themselves via the `!` shell prefix:
+**Handoff procedure (mandatory):** secret handling happens entirely **outside the Claude session** — never ask the user to paste a secret into chat, never compose a command containing one, and don't run the storage command yourself (not even via the `!` prefix; keeping the whole flow out of the session guarantees no secret can enter the conversation). Have the user copy the value (from the Anthropic Console, AWS output, etc.) and run this **in their own terminal**:
 
-```
-! pbpaste | gh secret set <SECRET_NAME> -R <owner>/<repo>
+```sh
+# user's own terminal — not inside the Claude session
+pbpaste | gh secret set <SECRET_NAME> -R <owner>/<repo>
 ```
 
-The value flows clipboard → gh → GitHub's encrypted store without appearing in the conversation, terminal scrollback, or shell history. On Linux replace `pbpaste` with `xclip -selection clipboard -o` or `wl-paste`.
+The value flows clipboard → gh → GitHub's encrypted store without ever being displayed or entering shell history. On Linux replace `pbpaste` with `xclip -selection clipboard -o` or `wl-paste`.
 
 For Claude/Anthropic tokens specifically, follow the flows in the next section.
 
 ## Claude token setup (reviewer / release workflows)
 
-Two token types, two flows — both end with the same secure pipe. Ask which the user
+Two token types, two flows. Both run **entirely in the user's own terminal, outside
+the Claude session** (per the handoff procedure above; `claude setup-token` is also
+interactive — browser auth — and won't run under a session shell). Ask which the user
 wants if unclear: OAuth token uses a Claude Pro/Max subscription; API key bills per-token.
 
 **`CLAUDE_CODE_OAUTH_TOKEN`** — used by `anthropics/claude-code-action` workflows
-(e.g. cicd-toolkit's own `claude-review.yml`). This one *can* be generated locally:
+(e.g. cicd-toolkit's own `claude-review.yml`). This one *can* be generated locally.
+Give the user these steps to run in their own terminal:
 
-1. Have the user run `! claude setup-token` — it opens browser auth and prints a
-   long-lived OAuth token (requires a Claude Pro/Max subscription).
-2. Have them copy the token, then run:
-
-   ```
-   ! pbpaste | gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner>/<repo>
-   ```
+```sh
+# user's own terminal — not inside the Claude session
+claude setup-token   # browser auth; prints a long-lived OAuth token (Pro/Max required)
+# copy the printed token, then:
+pbpaste | gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner>/<repo>
+```
 
 **`ANTHROPIC_API_KEY`** — used by `release.yml` for AI release notes. API keys
 **cannot** be created programmatically (the Admin API only lists/renames/disables
-existing keys), so:
+existing keys). The user creates a key at https://console.anthropic.com/settings/keys,
+copies it, then in their own terminal:
 
-1. The user creates a key at https://console.anthropic.com/settings/keys and copies it.
-2. ```
-   ! pbpaste | gh secret set ANTHROPIC_API_KEY -R <owner>/<repo>
-   ```
+```sh
+# user's own terminal — not inside the Claude session
+pbpaste | gh secret set ANTHROPIC_API_KEY -R <owner>/<repo>
+```
 
 Verify either with `gh secret list -R <owner>/<repo>` — names and timestamps only;
 values are never readable back, which is the point.

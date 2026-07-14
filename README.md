@@ -284,12 +284,12 @@ This repo hosts a [Claude Code plugin marketplace](https://code.claude.com/docs/
 
 | Skill | What it does |
 |---|---|
-| `/integrate-cicd-toolkit` | Picks the right workflow, adapts a caller from `examples/`, and walks through secrets setup — including generating a `CLAUDE_CODE_OAUTH_TOKEN` via `claude setup-token` and storing any secret with a clipboard pipe (`pbpaste \| gh secret set …`) so values never enter the AI conversation. |
+| `/integrate-cicd-toolkit` | Picks the right workflow, adapts a caller from `examples/`, and walks through secrets setup — including generating a `CLAUDE_CODE_OAUTH_TOKEN` via `claude setup-token` and storing any secret with a clipboard pipe (`pbpaste \| gh secret set …`) run in your own terminal, outside the Claude session, so values never enter the AI conversation. |
 | `/bootstrap-oidc` | One-time GitHub → AWS OIDC provisioning via `bin/bootstrap.ts` (provider + deploy role), producing the `AWS_DEPLOY_ROLE_ARN` secret used by the AWS deploy workflows. |
 
 ## Claude PR review
 
-Every PR to this repo is automatically reviewed by [`claude-review.yml`](.github/workflows/claude-review.yml) (`anthropics/claude-code-action@v1`), which posts a single sticky comment covering shell/workflow pitfalls, breaking input changes, and README/`examples/` drift. It requires the `CLAUDE_CODE_OAUTH_TOKEN` repo secret, generated with `claude setup-token`.
+Every PR to this repo is automatically reviewed by [`claude-review.yml`](.github/workflows/claude-review.yml) (`anthropics/claude-code-action@v1`), which posts a single sticky comment covering shell/workflow pitfalls, breaking input changes, and README/`examples/` drift. It requires the `CLAUDE_CODE_OAUTH_TOKEN` repo secret — run `claude setup-token` in a terminal, copy the token, then `pbpaste | gh secret set CLAUDE_CODE_OAUTH_TOKEN -R KotaHusky/cicd-toolkit` (all outside any Claude session).
 
 ## License
 
