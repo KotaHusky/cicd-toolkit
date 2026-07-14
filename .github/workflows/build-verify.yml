@@ -257,8 +257,9 @@ jobs:
           set -euo pipefail
           set +e
           # --paginate + --slurp walks all pages, so >100 threads can't
-          # silently false-pass the gate.
-          THREADS=$(gh api graphql --paginate --slurp \
+          # silently false-pass the gate. gh rejects --slurp combined with
+          # --jq, so the count is extracted with a standalone jq pass below.
+          RAW=$(gh api graphql --paginate --slurp \
               -f owner="${{ github.repository_owner }}" \
               -f repo="${{ github.event.repository.name }}" \
               -F pr="${{ github.event.pull_request.number }}" \
@@ -271,7 +272,7 @@ jobs:
                     }
                   }
                 }
-              }' --jq '[.[].data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length' 2>&1)
+              }' 2>&1)
           STATUS=$?
           set -e
           if [ "$STATUS" -ne 0 ]; then
@@ -279,13 +280,14 @@ jobs:
             # closed on anything else (5xx, rate limit) so a consumer who
             # requires this check never gets false assurance — re-run fixes
             # transient failures.
-            if echo "$THREADS" | grep -qiE 'resource not accessible|forbidden|permission'; then
+            if echo "$RAW" | grep -qiE 'resource not accessible|forbidden|permission'; then
               echo "::notice title=Review threads::Token lacks permission to read review threads — skipping the gate. Grant the calling job pull-requests: read (or write) to enable it."
               exit 0
             fi
-            echo "::error title=Review threads::Could not query review threads (transient error?) — re-run this job. Output: ${THREADS}"
+            echo "::error title=Review threads::Could not query review threads (transient error?) — re-run this job. Output: ${RAW}"
             exit 1
           fi
+          THREADS=$(echo "$RAW" | jq '[.[].data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length')
           if [ "$THREADS" -gt 0 ]; then
             echo "::error title=Unresolved review threads::${THREADS} review thread(s) are unresolved on this PR. Disposition each — push a fix, or reply explaining why it's dismissed — then resolve it and re-run this check (Re-run failed jobs re-runs only this gate, not the review)."
             exit 1
