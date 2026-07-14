@@ -273,6 +273,17 @@ See [`examples/`](examples/) for ready-to-copy workflow files:
 - [`release.yml`](examples/release.yml) — AI-powered release on tag push
 - [`static-site.yml`](examples/static-site.yml) — Tag-driven release for an S3+CloudFront static site
 
+## Claude Code plugin
+
+This repo hosts a [Claude Code plugin marketplace](https://code.claude.com/docs/en/plugins). Installing the plugin gives Claude, in any consumer repo, skills for picking the right workflow, wiring up the caller file, setting secrets securely, and bootstrapping AWS OIDC:
+
+```
+/plugin marketplace add KotaHusky/cicd-toolkit
+/plugin install cicd-toolkit@cicd-toolkit
+```
+
+Skills: `/integrate-cicd-toolkit`, `/bootstrap-oidc`.
+
 ## License
 
 [MIT](LICENSE)

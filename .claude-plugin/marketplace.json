@@ -1,0 +1,13 @@
+{
+  "name": "cicd-toolkit",
+  "owner": {
+    "name": "KotaHusky"
+  },
+  "plugins": [
+    {
+      "name": "cicd-toolkit",
+      "source": "./plugins/cicd-toolkit",
+      "description": "Skills for integrating KotaHusky/cicd-toolkit reusable workflows, composite actions, and CDK constructs into consumer repos."
+    }
+  ]
+}
