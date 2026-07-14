@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/KotaHusky/cicd-toolkit/main/schemas/whats-new.schema.json",
+  "title": "What's-New Release Summary",
+  "description": "End-user-facing release summary produced by release.yml (whats-new.json). The cumulative releases.json is an array of this object, newest first.",
+  "type": "object",
+  "required": ["version", "date", "title", "summary", "highlights"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "description": "Contract version of this artifact. Absent on artifacts produced before v1; consumers should treat absent as 1.",
+      "const": 1
+    },
+    "version": {
+      "type": "string",
+      "description": "App semver without the leading v, e.g. \"1.4.0\"."
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "UTC publish date, YYYY-MM-DD."
+    },
+    "title": {
+      "type": "string",
+      "description": "Short plain-language headline (3-6 words)."
+    },
+    "summary": {
+      "type": "string",
+      "description": "1-2 sentence plain-language overview."
+    },
+    "highlights": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 5,
+      "description": "Short user-facing bullets."
+    }
+  }
+}

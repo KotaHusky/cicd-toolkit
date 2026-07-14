@@ -9,6 +9,9 @@ consumed by other repos. `examples/` holds copy-paste caller workflows for consu
 - Workflows cannot be run locally. Consumers reference this repo at `@main`, so
   merging to `main` ships to all consumers immediately. Test from a consumer repo
   pointed at your branch: `uses: KotaHusky/cicd-toolkit/.github/workflows/<wf>.yml@<branch>`.
+- Third-party actions are pinned to commit SHAs with a `# <tag>` comment
+  (Dependabot keeps them fresh). Keep new `uses:` refs SHA-pinned, except
+  `actions/*` and `anthropics/*` which stay on tags.
 - Shell steps run under `set -euo pipefail` — commands that legitimately exit
   non-zero (e.g. `grep` with no match) need explicit guards.
 - When changing a workflow's or action's inputs/outputs, update its README section
@@ -24,7 +27,8 @@ consumed by other repos. `examples/` holds copy-paste caller workflows for consu
 - This repo hosts a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`
   + `plugins/cicd-toolkit/skills/`). When a workflow's inputs, secrets, or the
   integration flow change, check the plugin skills for drift too — they're the
-  guidance consumer repos' agents receive.
+  guidance consumer repos' agents receive. Bump the version in
+  `plugins/cicd-toolkit/.claude-plugin/plugin.json` whenever skills change.
 - `claude-review.yml` is a **reusable** (`workflow_call`) Claude review workflow
   consumers call like any other; `claude-review-self.yml` dogfoods it on this repo's
   own PRs (inline + sticky comments; skips bot PRs; needs the `CLAUDE_CODE_OAUTH_TOKEN`
