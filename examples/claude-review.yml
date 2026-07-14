@@ -9,8 +9,9 @@
 #        pass `environment: <name>` with `secrets: inherit` (see below)
 #      - Claude Pro/Max:     gh secret set CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`)
 #
-# If no credentials are available, the run posts a warning annotation and skips
-# the review (set fail-on-missing-key: true to fail the job instead).
+# The review is advisory: if credentials are missing or the review errors, the
+# run posts a notice annotation and the job still passes. Set strict: true to
+# fail the job instead.
 
 name: Claude Review
 
@@ -32,7 +33,7 @@ jobs:
     # with:
     #   model: 'claude-sonnet-4-6'     # override the default model
     #   max-turns: '15'                # tighten the cost cap
-    #   fail-on-missing-key: true      # fail instead of warn+skip
+    #   strict: true                   # fail the job if the review can't run
     #   review-prompt: |               # project-specific focus areas
     #     Pay extra attention to the public API surface in src/api/.
 

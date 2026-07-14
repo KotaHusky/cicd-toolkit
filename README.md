@@ -213,14 +213,14 @@ To source the key from a GitHub environment in the consuming repo instead of a r
 | `model` | string | `''` | Claude model override; empty uses the action default |
 | `review-prompt` | string | `''` | Extra project-specific review instructions |
 | `max-turns` | string | `25` | Max agent turns per review (cost control) |
-| `fail-on-missing-key` | boolean | `false` | Fail with an error annotation when credentials are missing, instead of warning and skipping |
+| `strict` | boolean | `false` | Fail the job when the review can't run (missing credentials or a review error); default is a notice annotation and a passing job |
 
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `ANTHROPIC_API_KEY` | one of | Anthropic API key (pay-per-token billing) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | one of | Claude Pro/Max OAuth token from `claude setup-token` (uses subscription quota) |
 
-If neither secret is available at run time, the workflow emits a **warning annotation** and skips the review without failing the caller's CI; set `fail-on-missing-key: true` to fail the job with an **error annotation** instead.
+The review is advisory by default: if no credentials are available, or the review step itself errors, the run emits a **notice annotation** and the job still passes — the caller's CI is never blocked. Set `strict: true` to fail the job with an **error annotation** instead.
 
 ## Setup
 
