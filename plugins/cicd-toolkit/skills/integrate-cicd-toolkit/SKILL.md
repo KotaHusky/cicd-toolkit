@@ -80,8 +80,10 @@ the Claude session** (per the handoff procedure above; `claude setup-token` is a
 interactive — browser auth — and won't run under a session shell). Ask which the user
 wants if unclear: OAuth token uses a Claude Pro/Max subscription; API key bills per-token.
 
-**`CLAUDE_CODE_OAUTH_TOKEN`** — used by `anthropics/claude-code-action` workflows
-(e.g. cicd-toolkit's own `claude-review.yml`). This one *can* be generated locally.
+**`CLAUDE_CODE_OAUTH_TOKEN`** — the preferred, one-token-for-everything option:
+used by `anthropics/claude-code-action` workflows (`claude-review.yml`, the
+review embedded in `build-verify.yml`) and preferred by `release.yml` for both
+release notes and what's-new generation. This one *can* be generated locally.
 Give the user these steps to run in their own terminal:
 
 ```sh
@@ -91,7 +93,9 @@ claude setup-token   # browser auth; prints a long-lived OAuth token (Pro/Max re
 pbpaste | gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner>/<repo>
 ```
 
-**`ANTHROPIC_API_KEY`** — used by `release.yml` for AI release notes. API keys
+**`ANTHROPIC_API_KEY`** — pay-per-token fallback for `release.yml` (which
+prefers `CLAUDE_CODE_OAUTH_TOKEN` when set — one token covers both review and
+release workflows). API keys
 **cannot** be created programmatically (the Admin API only lists/renames/disables
 existing keys). The user creates a key at https://console.anthropic.com/settings/keys,
 copies it, then in their own terminal:

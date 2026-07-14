@@ -14,7 +14,13 @@ jobs:
     permissions:
       contents: write
     secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # One of the two is required. OAuth token preferred (subscription-billed,
+      # from `claude setup-token`; requires the Claude GitHub App on the repo).
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # pay-per-token fallback
     # with:
-    #   model: 'claude-sonnet-4-5-20250929'   # default
-    #   draft: false                            # default
+    #   model: 'claude-haiku-4-5'   # default
+    #   draft: false                # default
+    #   app-context: 'MyApp is a ... — users are ...'  # improves the public what's-new
+    #   whats-new: true             # default; attaches whats-new.json + releases.json
+    #   auto-publish: true          # default; false uploads a draft for human review

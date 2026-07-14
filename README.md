@@ -162,7 +162,7 @@ jobs:
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model` | string | `claude-sonnet-4-5-20250929` | Claude model to use |
+| `model` | string | `claude-haiku-4-5` | Claude model for notes + what's-new (fast/cheap fits this task) |
 | `draft` | boolean | `false` | Create as draft release |
 | `app-context` | string | `''` | End-user-facing app description for the public what's-new summary (combined with `.github/whats-new-context.md`) |
 | `whats-new` | boolean | `true` | Also generate `whats-new.json` + `releases.json` release assets |
@@ -170,13 +170,16 @@ jobs:
 
 | Secret | Required | Description |
 |--------|----------|-------------|
-| `ANTHROPIC_API_KEY` | yes | Your Anthropic API key |
+| `CLAUDE_CODE_OAUTH_TOKEN` | one of | Claude Pro/Max OAuth token from `claude setup-token` — preferred; billed to subscription |
+| `ANTHROPIC_API_KEY` | one of | Anthropic API key — pay-per-token fallback |
 
 | Output | Description |
 |--------|-------------|
 | `release-url` | URL of the created release |
 
 The workflow compares commits between the current and previous semver tags, sends the log to Claude, and creates a release titled `v1.2.0 — <AI-generated title>` with a summary and full changelog.
+
+**Auth:** when `CLAUDE_CODE_OAUTH_TOKEN` is set it is preferred — generation runs via [claude-code-action](https://github.com/anthropics/claude-code-action) on your subscription (requires the [Claude GitHub App](https://github.com/apps/claude); note the action skips if the caller workflow file differs from the repo's default branch, so tag from a commit whose workflows match `main`). Otherwise `ANTHROPIC_API_KEY` is used via direct API calls. One of the two is required.
 
 ### End-User What's-New Summaries
 
