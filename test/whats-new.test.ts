@@ -28,8 +28,12 @@ function failingFetch(): FetchLike {
 }
 
 describe('parseWhatsNew', () => {
-  it('accepts a valid release', () => {
-    expect(parseWhatsNew(valid)).toEqual(valid);
+  it('accepts a valid release, defaulting schemaVersion to 1', () => {
+    expect(parseWhatsNew(valid)).toEqual({ ...valid, schemaVersion: 1 });
+  });
+
+  it('preserves an explicit schemaVersion', () => {
+    expect(parseWhatsNew({ ...valid, schemaVersion: 1 })?.schemaVersion).toBe(1);
   });
 
   it('rejects missing fields', () => {

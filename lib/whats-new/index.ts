@@ -7,6 +7,11 @@
  */
 
 export interface WhatsNewRelease {
+  /**
+   * Contract version of the artifact (see schemas/whats-new.schema.json).
+   * Absent on artifacts produced before the field existed — treat as 1.
+   */
+  schemaVersion?: number;
   /** Semver without the leading v, e.g. "1.4.0". */
   version: string;
   /** ISO date (YYYY-MM-DD) the release was published. */
@@ -54,6 +59,7 @@ export function parseWhatsNew(data: unknown): WhatsNewRelease | null {
     return null;
   }
   return {
+    schemaVersion: typeof d.schemaVersion === 'number' ? d.schemaVersion : 1,
     version: d.version,
     date: d.date,
     title: d.title,

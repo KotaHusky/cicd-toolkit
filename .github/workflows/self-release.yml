@@ -12,6 +12,7 @@ jobs:
   release:
     uses: ./.github/workflows/release.yml
     secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
   float-tags:

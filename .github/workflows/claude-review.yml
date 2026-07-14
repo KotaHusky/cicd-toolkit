@@ -59,6 +59,11 @@ jobs:
     timeout-minutes: 30
     environment: ${{ inputs.environment }}
     steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2
+        with:
+          egress-policy: audit
+
       # The `secrets` context is not allowed in job-level `if`, so gate in a step.
       - name: Check for Anthropic credentials
         id: gate

@@ -27,7 +27,7 @@ Adapt the example rather than authoring a caller from scratch.
 
 | Consumer need | Workflow |
 |---|---|
-| PR build/test/lint for Node (Turborepo-aware) | `build-verify.yml` |
+| PR build/test/lint for Node (Turborepo-aware) | `build-verify.yml` — also runs an advisory Claude review on PRs when the caller passes `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` (opt out with `claude-review: false`; caller job needs `pull-requests: write` for comments) |
 | Enforce Conventional Commits on PRs | `commitlint.yml` |
 | Build + push Docker image to GHCR | `docker-ghcr.yml` |
 | Deploy AWS CDK app (OIDC auth) | `cdk-deploy.yml` (synth-only check: `cdk-synth.yml`) |

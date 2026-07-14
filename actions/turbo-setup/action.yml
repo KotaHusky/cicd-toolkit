@@ -39,7 +39,7 @@ runs:
         key: node-modules-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
 
     - name: Turbo remote cache
-      uses: rharkor/caching-for-turbo@v2.5.0
+      uses: rharkor/caching-for-turbo@75f8ebf4a43d2c60b23bc2a27082cfea94ffdad9 # v2.5.0
 
     - name: Pre-build workspace packages
       if: inputs.pre-build-filter != ''

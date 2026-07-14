@@ -201,7 +201,7 @@ The workflow compares commits between the current and previous semver tags, send
 
 ### End-User What's-New Summaries
 
-Releases are **two-tier**: the GitHub Release body stays engineer-focused and specific, while `release.yml` additionally generates a plain-language, end-user-facing summary your app can display — a `whats-new.json` (latest) and cumulative `releases.json` (last 20) attached to each release as assets.
+Releases are **two-tier**: the GitHub Release body stays engineer-focused and specific, while `release.yml` additionally generates a plain-language, end-user-facing summary your app can display — a `whats-new.json` (latest) and cumulative `releases.json` (last 20) attached to each release as assets. The artifact contract is versioned (`schemaVersion: 1`) and published at [`schemas/whats-new.schema.json`](schemas/whats-new.schema.json).
 
 **How it stays app-aware and leak-free:**
 
@@ -306,6 +306,19 @@ gh secret set AWS_DEPLOY_ROLE_ARN --repo <owner>/<repo>
 ```
 
 Generate your Anthropic API key at [console.anthropic.com](https://console.anthropic.com/) under API Keys. For `claude-review.yml`, also install the [Claude GitHub App](https://github.com/apps/claude) on the repo; Claude Pro/Max subscribers can set `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) instead of an API key to draw on subscription usage rather than per-token billing.
+
+### Pinning & Versions
+
+All examples reference `@main` (bleeding edge — merges here ship to you immediately). Floating release tags are also maintained automatically on every release, so pick your stability tier:
+
+| Ref | Behavior |
+|-----|----------|
+| `@main` | Latest, updates on every merge |
+| `@v2` | Latest release in major 2 — advances on each release, breaking changes gated on `v3` |
+| `@v2.5` | Latest patch of 2.5 |
+| `@<sha>` | Fully pinned (maximum supply-chain rigor) |
+
+Internally, this repo pins third-party actions to commit SHAs (OpenSSF practice); Dependabot keeps the pins current.
 
 ### OIDC Bootstrap (CDK Deploy)
 
