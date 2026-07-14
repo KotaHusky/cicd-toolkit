@@ -203,7 +203,7 @@ jobs:
             echo "has-credentials=true" >> "$GITHUB_OUTPUT"
           else
             echo "has-credentials=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Claude review skipped::No ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN secret reached build-verify. Pass one via 'secrets:' (or use 'secrets: inherit') to enable AI review, or set 'claude-review: false' to silence this notice."
+            echo "::notice title=Claude review skipped::No ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN secret reached build-verify. Pass one via 'secrets:' (or 'secrets: inherit') to enable AI review, or set 'claude-review: false' to silence this notice. Note: PRs from forks never receive secrets, so this is expected there."
           fi
 
       - name: Checkout code
