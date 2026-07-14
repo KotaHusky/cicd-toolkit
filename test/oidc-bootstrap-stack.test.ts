@@ -86,7 +86,9 @@ describe('OidcBootstrapStack', () => {
       'cloudformation:GetResource',
       'cloudformation:ListResources',
     ]);
-    expect(stmt.Resource).toBe('arn:aws:cloudformation:*:*:resource/*');
+    // Cloud Control actions support no resource-level permissions — an
+    // ARN-scoped grant here would silently match nothing.
+    expect(stmt.Resource).toBe('*');
   });
 
   test('outputs role ARNs', () => {

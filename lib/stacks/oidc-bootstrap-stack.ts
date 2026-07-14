@@ -84,6 +84,9 @@ export class OidcBootstrapStack extends cdk.Stack {
       );
 
       if (roleDef.directDeployResourceOps) {
+        // Like ListStacks, the Cloud Control API actions support no
+        // resource-level permissions (verified via the IAM policy
+        // simulator) — any ARN-scoped grant silently matches nothing.
         role.addToPolicy(
           new iam.PolicyStatement({
             sid: 'CdkDirectDeployResourceOps',
@@ -94,7 +97,7 @@ export class OidcBootstrapStack extends cdk.Stack {
               'cloudformation:GetResource',
               'cloudformation:ListResources',
             ],
-            resources: ['arn:aws:cloudformation:*:*:resource/*'],
+            resources: ['*'],
           }),
         );
       }
