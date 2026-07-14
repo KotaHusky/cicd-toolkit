@@ -257,8 +257,9 @@ jobs:
           set -euo pipefail
           set +e
           # --paginate + --slurp walks all pages, so >100 threads can't
-          # silently false-pass the gate.
-          THREADS=$(gh api graphql --paginate --slurp \
+          # silently false-pass the gate. gh rejects --slurp combined with
+          # --jq, so the response is parsed with standalone jq below.
+          RAW=$(gh api graphql --paginate --slurp \
               -f owner="${{ github.repository_owner }}" \
               -f repo="${{ github.event.repository.name }}" \
               -F pr="${{ github.event.pull_request.number }}" \
@@ -271,8 +272,13 @@ jobs:
                     }
                   }
                 }
-              }' --jq '[.[].data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length' 2>&1)
+              }' 2>&1)
           STATUS=$?
+          if [ "$STATUS" -eq 0 ]; then
+            THREADS=$(printf '%s' "$RAW" | jq '[.[].data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length' 2>&1)
+            STATUS=$?
+          fi
+          THREADS=${THREADS:-$RAW}
           set -e
           if [ "$STATUS" -ne 0 ]; then
             # Fail open ONLY on permission errors (restricted token); fail
