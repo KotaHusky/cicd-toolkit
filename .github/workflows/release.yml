@@ -69,7 +69,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          fetch-tags: true
+          # Full history, which also fetches all tags via a wildcard refspec.
+          # fetch-tags: true with a shallow fetch is fatal on tag-push events
+          # (actions/checkout#1467: "Cannot fetch both <sha> and refs/tags/X").
+          fetch-depth: 0
 
       # OAuth preferred (one token across repos, subscription-billed);
       # API key is the curl fallback. The secrets context is not allowed in
