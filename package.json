@@ -23,7 +23,8 @@
   },
   "peerDependencies": {
     "aws-cdk-lib": "^2.178.0",
-    "constructs": "^10.4.2"
+    "constructs": "^10.4.2",
+    "react": ">=18"
   },
   "devDependencies": {
     "@types/node": "^20.17.14",
@@ -32,6 +33,19 @@
     "constructs": "^10.4.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3",
-    "vitest": "^2.1.9"
+    "vitest": "^2.1.9",
+    "react": "^19.0.0",
+    "@types/react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "aws-cdk-lib": {
+      "optional": false
+    },
+    "constructs": {
+      "optional": false
+    }
   }
 }
