@@ -68,7 +68,35 @@ Determine which secrets the chosen workflow needs (from the fetched README). Com
 
 The value flows clipboard → gh → GitHub's encrypted store without appearing in the conversation, terminal scrollback, or shell history. On Linux replace `pbpaste` with `xclip -selection clipboard -o` or `wl-paste`.
 
-Note: Anthropic API keys cannot be created programmatically — the Admin API only lists/updates existing keys. The user must create the key at console.anthropic.com, then use the pipe above. For Claude Code OAuth tokens, `claude setup-token` generates the value locally; store it the same way.
+For Claude/Anthropic tokens specifically, follow the flows in the next section.
+
+## Claude token setup (reviewer / release workflows)
+
+Two token types, two flows — both end with the same secure pipe. Ask which the user
+wants if unclear: OAuth token uses a Claude Pro/Max subscription; API key bills per-token.
+
+**`CLAUDE_CODE_OAUTH_TOKEN`** — used by `anthropics/claude-code-action` workflows
+(e.g. cicd-toolkit's own `claude-review.yml`). This one *can* be generated locally:
+
+1. Have the user run `! claude setup-token` — it opens browser auth and prints a
+   long-lived OAuth token (requires a Claude Pro/Max subscription).
+2. Have them copy the token, then run:
+
+   ```
+   ! pbpaste | gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner>/<repo>
+   ```
+
+**`ANTHROPIC_API_KEY`** — used by `release.yml` for AI release notes. API keys
+**cannot** be created programmatically (the Admin API only lists/renames/disables
+existing keys), so:
+
+1. The user creates a key at https://console.anthropic.com/settings/keys and copies it.
+2. ```
+   ! pbpaste | gh secret set ANTHROPIC_API_KEY -R <owner>/<repo>
+   ```
+
+Verify either with `gh secret list -R <owner>/<repo>` — names and timestamps only;
+values are never readable back, which is the point.
 
 ## Gotchas
 

@@ -21,6 +21,16 @@ consumed by other repos. `examples/` holds copy-paste caller workflows for consu
 - Pushing a `v*` tag triggers `release.yml`, which calls the Anthropic API
   (`ANTHROPIC_API_KEY` secret) to generate release notes. Only tag when cutting a release.
 
+## Claude Tooling in This Repo
+- This repo hosts a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`
+  + `plugins/cicd-toolkit/skills/`). When a workflow's inputs, secrets, or the
+  integration flow change, check the plugin skills for drift too — they're the
+  guidance consumer repos' agents receive.
+- Every PR is auto-reviewed by `claude-review.yml` (posts one sticky comment;
+  requires the `CLAUDE_CODE_OAUTH_TOKEN` secret, generated via `claude setup-token`).
+- Secrets are set via clipboard pipe, never pasted into chat or composed into
+  commands: user runs `! pbpaste | gh secret set <NAME> -R KotaHusky/cicd-toolkit`.
+
 ## Git Worktree Rules (MANDATORY)
 - **NEVER work directly on `main`**. Always create a feature branch.
 - **Use git worktrees** for parallel work: `git worktree add ../<repo>-<feature> -b feat/<feature>`
