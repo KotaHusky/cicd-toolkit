@@ -26,8 +26,10 @@ consumed by other repos. `examples/` holds copy-paste caller workflows for consu
   + `plugins/cicd-toolkit/skills/`). When a workflow's inputs, secrets, or the
   integration flow change, check the plugin skills for drift too — they're the
   guidance consumer repos' agents receive.
-- Every PR is auto-reviewed by `claude-review.yml` (posts one sticky comment;
-  requires the `CLAUDE_CODE_OAUTH_TOKEN` secret, generated via `claude setup-token`).
+- `claude-review.yml` is a **reusable** (`workflow_call`) Claude review workflow
+  consumers call like any other; `claude-review-self.yml` dogfoods it on this repo's
+  own PRs (inline + sticky comments; skips bot PRs; needs the `CLAUDE_CODE_OAUTH_TOKEN`
+  or `ANTHROPIC_API_KEY` secret). Changing its inputs is a consumer-facing change.
 - Secrets never touch a Claude session — not pasted into chat, not composed into
   commands, not run via the `!` prefix. The user runs
   `pbpaste | gh secret set <NAME> -R KotaHusky/cicd-toolkit` in their own terminal.

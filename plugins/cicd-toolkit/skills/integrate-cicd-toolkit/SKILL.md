@@ -34,6 +34,7 @@ Adapt the example rather than authoring a caller from scratch.
 | Static site (Next.js/Astro/Vite) → S3 + CloudFront | `static-s3-deploy.yml` |
 | Node/Express app → ECS Fargate | `ecs-express-deploy.yml` / `ecs-express-app-deploy.yml` |
 | GitHub Release with AI-generated notes on `v*` tag | `release.yml` |
+| Claude AI review on every PR (inline + sticky summary) | `claude-review.yml` — needs the [Claude GitHub App](https://github.com/apps/claude) installed and `ANTHROPIC_API_KEY` **or** `CLAUDE_CODE_OAUTH_TOKEN`; advisory by default (never blocks CI), `strict: true` to enforce |
 | Semver tag automation | `semver-tag.yml` |
 | Azure Container Apps | `aca-provision.yml`, `aca-deploy.yml` |
 | Cloudflare DNS management | `cloudflare-dns.yml` |

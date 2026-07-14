@@ -175,6 +175,53 @@ jobs:
 
 The workflow compares commits between the current and previous semver tags, sends the log to Claude, and creates a release titled `v1.2.0 — <AI-generated title>` with a summary and full changelog.
 
+### Claude Code Review
+
+**`claude-review.yml`** — Automated Claude review on pull requests via [anthropics/claude-code-action](https://github.com/anthropics/claude-code-action). Posts inline comments for line-specific findings plus one sticky summary comment that updates on new pushes.
+
+Requires the [Claude GitHub App](https://github.com/apps/claude) to be installed on the consuming repo.
+
+```yaml
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+
+jobs:
+  review:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/claude-review.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+      actions: read
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+To source the key from a GitHub environment in the consuming repo instead of a repo secret, pass the environment name and inherit secrets (environment secrets only resolve with `secrets: inherit`):
+
+```yaml
+    with:
+      environment: claude
+    secrets: inherit
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `environment` | string | `''` | GitHub environment (in the calling repo) to source secrets from; requires `secrets: inherit` |
+| `model` | string | `''` | Claude model override; empty uses the action default |
+| `review-prompt` | string | `''` | Extra project-specific review instructions |
+| `max-turns` | string | `25` | Max agent turns per review (cost control) |
+| `strict` | boolean | `false` | Fail the job when the review can't run (missing credentials or a review error); default is a notice annotation and a passing job |
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `ANTHROPIC_API_KEY` | one of | Anthropic API key (pay-per-token billing) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | one of | Claude Pro/Max OAuth token from `claude setup-token` (uses subscription quota) |
+
+The review is advisory by default: if no credentials are available, or the review step itself errors, the run emits a **notice annotation** and the job still passes — the caller's CI is never blocked. Set `strict: true` to fail the job with an **error annotation** instead.
+
 ## Setup
 
 ### Secrets
@@ -182,14 +229,14 @@ The workflow compares commits between the current and previous semver tags, send
 Consumer repos need to configure the following secrets depending on which workflows they use:
 
 ```bash
-# For AI-powered releases (release.yml)
+# For AI-powered releases (release.yml) and Claude code review (claude-review.yml)
 gh secret set ANTHROPIC_API_KEY --repo <owner>/<repo>
 
 # For CDK deployments (cdk-deploy.yml)
 gh secret set AWS_DEPLOY_ROLE_ARN --repo <owner>/<repo>
 ```
 
-Generate your Anthropic API key at [console.anthropic.com](https://console.anthropic.com/) under API Keys.
+Generate your Anthropic API key at [console.anthropic.com](https://console.anthropic.com/) under API Keys. For `claude-review.yml`, also install the [Claude GitHub App](https://github.com/apps/claude) on the repo; Claude Pro/Max subscribers can set `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) instead of an API key to draw on subscription usage rather than per-token billing.
 
 ### OIDC Bootstrap (CDK Deploy)
 
@@ -289,7 +336,7 @@ This repo hosts a [Claude Code plugin marketplace](https://code.claude.com/docs/
 
 ## Claude PR review
 
-Every PR to this repo is automatically reviewed by [`claude-review.yml`](.github/workflows/claude-review.yml) (`anthropics/claude-code-action@v1`), which posts a single sticky comment covering shell/workflow pitfalls, breaking input changes, and README/`examples/` drift. It requires the `CLAUDE_CODE_OAUTH_TOKEN` repo secret — run `claude setup-token` in a terminal, copy the token, then `pbpaste | gh secret set CLAUDE_CODE_OAUTH_TOKEN -R KotaHusky/cicd-toolkit` (all outside any Claude session).
+Every PR to this repo is automatically reviewed by [`claude-review-self.yml`](.github/workflows/claude-review-self.yml), which dogfoods the reusable [`claude-review.yml`](.github/workflows/claude-review.yml) documented in [Workflows](#claude-code-review) — inline comments for line-specific findings plus one sticky summary, with a prompt tuned for reusable-workflow risks (shell pitfalls, breaking input changes, README/`examples/`/skills drift). Bot PRs are skipped. Credentials: the `CLAUDE_CODE_OAUTH_TOKEN` repo secret — run `claude setup-token` in a terminal, copy the token, then `pbpaste | gh secret set CLAUDE_CODE_OAUTH_TOKEN -R KotaHusky/cicd-toolkit` (all outside any Claude session).
 
 ## License
 
