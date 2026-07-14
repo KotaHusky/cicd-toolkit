@@ -17,7 +17,6 @@ consumed by other repos. `examples/` holds copy-paste caller workflows for consu
 ## CDK Library & Releases
 - No barrel `lib/index.ts` — consumers deep-import from `lib/constructs/*` and
   `lib/stacks/*`. Don't add one.
-- No lockfile is committed, by design — don't add `package-lock.json`.
 - Pushing a `v*` tag triggers `release.yml`, which calls the Anthropic API
   (`ANTHROPIC_API_KEY` secret) to generate release notes. Only tag when cutting a release.
 
@@ -30,6 +29,10 @@ consumed by other repos. `examples/` holds copy-paste caller workflows for consu
   consumers call like any other; `claude-review-self.yml` dogfoods it on this repo's
   own PRs (inline + sticky comments; skips bot PRs; needs the `CLAUDE_CODE_OAUTH_TOKEN`
   or `ANTHROPIC_API_KEY` secret). Changing its inputs is a consumer-facing change.
+- Releases are two-tier: engineer notes (release body) plus a public
+  `whats-new.json` generated from the consumer's `.github/whats-new-context.md`,
+  sanitized by a judge pass and a deny-list. The context file is a living doc —
+  the integrate skill mandates updating it alongside feature changes.
 - Secrets never touch a Claude session — not pasted into chat, not composed into
   commands, not run via the `!` prefix. The user runs
   `pbpaste | gh secret set <NAME> -R KotaHusky/cicd-toolkit` in their own terminal.
