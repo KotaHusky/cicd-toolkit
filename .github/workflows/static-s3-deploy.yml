@@ -66,6 +66,14 @@ on:
         required: false
         type: string
         default: ''
+      whats-new-path:
+        description: >-
+          Bake the latest release's whats-new.json into the build at this path
+          (relative to working-directory, e.g. public/whats-new.json).
+          Empty disables. See the What's-New section of the README.
+        required: false
+        type: string
+        default: ''
     secrets:
       role-arn:
         description: 'IAM role ARN for AWS authentication via OIDC'
@@ -126,6 +134,21 @@ jobs:
             [ -z "$LINE" ] && continue
             echo "$LINE" >> "$GITHUB_ENV"
           done <<< "${{ inputs.build-args }}"
+
+      - name: Inject what's-new summary
+        if: inputs.whats-new-path != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ inputs.whats-new-path }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "${TARGET}")"
+          if gh release download --repo "${{ github.repository }}" --pattern 'whats-new.json' --output "${TARGET}" --clobber 2>/dev/null; then
+            echo "Injected what's-new summary at ${TARGET}"
+          else
+            echo "::notice title=whats-new::No whats-new.json asset on the latest release — skipping injection. The app should handle the file being absent."
+          fi
 
       - name: Build
         shell: bash
