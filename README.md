@@ -230,7 +230,7 @@ Bump rules (matching semantic-release defaults): `feat!:`/`BREAKING CHANGE` → 
 | Output | Description |
 |--------|-------------|
 | `tag` | The created tag, or empty when nothing was releasable |
-| `bump` | `major`, `minor`, `patch`, or `none` |
+| `bump` | `major`, `minor`, `patch`, `none`, or `retry` (re-release of an orphaned tag) |
 
 The tag is created with the run's `GITHUB_TOKEN`, whose events don't trigger other workflows — `release.yml` is invoked directly as a nested workflow, so no PAT is needed and a tag-push release workflow can coexist without double-releasing. Manual `v*.*.*` tags keep working as an escape hatch and become the new baseline for the next auto bump.
 
