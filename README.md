@@ -34,6 +34,7 @@ jobs:
 | `claude-review` | boolean | `true` | Advisory Claude AI review on PRs; activates only when an Anthropic secret is passed |
 | `claude-review-prompt` | string | `''` | Extra project-specific review instructions |
 | `require-resolved-review-threads` | boolean | `true` | Status check that fails while the PR has unresolved review threads — findings must be fixed or resolved-with-a-reply before merge. Needs `pull-requests: read` on the caller (no-ops with a notice otherwise). Don't mark it a *required* branch check unless every PR runs it: skipped paths (bot PRs, `push` events, opt-out) leave a required check stuck on "Expected" |
+| `review-test-gaps` | boolean | `false` | Also analyze test coverage of the changed lines — flags changed code paths whose tests were not updated |
 
 **Built-in Claude review:** when the caller passes `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` (directly or via `secrets: inherit`), pull requests get an advisory AI review (inline comments + sticky summary) with no extra workflow file. It never blocks CI: no credentials → skip with a notice; insufficient permissions → the review step is swallowed. For comments to post, grant the calling job `pull-requests: write` (see [Claude Code Review](#claude-code-review) for the standalone workflow and full permission block). Requires the [Claude GitHub App](https://github.com/apps/claude) on the repo. Set `claude-review: false` to opt out.
 
@@ -89,11 +90,14 @@ jobs:
 | `push` | boolean | `true` | Push image to registry |
 | `platforms` | string | `linux/amd64` | Target platforms |
 | `version` | string | | Semantic version (e.g. `1.2.3`). Adds `v1.2.3`, `v1.2`, `v1` tags. |
+| `attest` | boolean | `false` | Publish a GitHub build-provenance attestation for the pushed image. Caller must grant `id-token: write` and `attestations: write` |
 
 | Output | Description |
 |--------|-------------|
 | `tags` | Generated image tags |
 | `digest` | Image digest |
+
+**Provenance & attestations:** images build with BuildKit provenance (`mode=max`) by default; setting `attest: true` additionally publishes a [GitHub artifact attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) binding the image digest to the exact workflow run. Consumers can verify with `gh attestation verify oci://ghcr.io/<owner>/<image>@<digest> -R <owner>/<repo>`. Requires the caller to grant `id-token: write` + `attestations: write`.
 
 ### CDK Deploy
 
@@ -130,6 +134,9 @@ See the workflow file for the full list (`pre-build-filter`, `concurrency`, `run
 | `role-arn` | yes | ARN of the IAM role to assume via OIDC |
 
 **PR check:** `cdk-synth.yml` is the synth-only companion — it runs `cdk synth` with no AWS credentials or secrets, so use it as the pull-request gate to catch template errors before merge (inputs: `node-version`, `pre-build-filter`, `cdk-context`, all optional). See [`examples/cdk-deploy.yml`](examples/cdk-deploy.yml) for the paired PR-synth + main-deploy layout.
+
+**Policy scan:** `cdk-synth.yml` also runs a [checkov](https://www.checkov.io/) policy scan over the synthesized CloudFormation (`policy-scan`, default `true`). Report-only by default (`policy-soft-fail: true`) — findings land in the job summary and a `policy-scan-results` artifact without failing the check; set `policy-soft-fail: false` to enforce.
+
 
 ### Static Site Deploy (S3 + CloudFront)
 
@@ -332,6 +339,19 @@ jobs:
 | `CLOUDFLARE_API_TOKEN` | yes | Token with Zone.DNS edit (plus Zone.Cache Purge if `purge-cache`) |
 | `CLOUDFLARE_ZONE_ID` | yes | Zone ID from the zone's Overview page |
 
+### Environments, Promotion & Rollback
+
+All AWS deploy workflows (`cdk-deploy.yml`, `static-s3-deploy.yml`, `ecs-express-deploy.yml`, `ecs-express-app-deploy.yml`) accept two additional inputs:
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `environment` | string | `''` | [GitHub Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments) for the deploy job — enables approval gates, wait timers, and environment-scoped secrets. Empty = no environment |
+| `track-deployment` | boolean | `false` | Record a GitHub Deployment + status per run (raw data for DORA metrics). Never fails the deploy; the caller must grant `deployments: write` or the steps notice-and-skip |
+
+**Promotion pattern:** call the same reusable workflow twice with `environment: dev` (no protection) and `environment: prod` (required reviewers on the Environment) — GitHub pauses the prod job until approved.
+
+**Rollback:** redeploy the old ref — see [`examples/rollback.yml`](examples/rollback.yml) for a `workflow_dispatch` rollback that points `checkout-ref` at a previous release tag. Infrastructure stays put; only the deployed artifact changes.
+
 ### AI-Powered Release
 
 **`release.yml`** — Create a GitHub Release with a Claude-generated title and summary when a semver tag is pushed.
@@ -495,6 +515,7 @@ To source the key from a GitHub environment in the consuming repo instead of a r
 | `review-prompt` | string | `''` | Extra project-specific review instructions |
 | `max-turns` | string | `25` | Max agent turns per review (cost control) |
 | `strict` | boolean | `false` | Fail the job when the review can't run (missing credentials or a review error); default is a notice annotation and a passing job |
+| `review-test-gaps` | boolean | `false` | Also analyze test coverage of the changed lines — flags changed code paths whose tests were not updated |
 | `require-resolved-review-threads` | boolean | `true` | Status check ("Review Threads Resolved") that fails while the PR has unresolved review threads — disposition each finding (fix, or resolve with a reply saying why) then re-run the failed gate job. Needs `pull-requests: read`; skips bot PRs. Don't mark it a *required* branch check unless every PR runs it — skipped paths leave a required check stuck on "Expected" |
 
 | Secret | Required | Description |
@@ -503,6 +524,42 @@ To source the key from a GitHub environment in the consuming repo instead of a r
 | `CLAUDE_CODE_OAUTH_TOKEN` | one of | Claude Pro/Max OAuth token from `claude setup-token` (uses subscription quota) |
 
 The review is advisory by default: if no credentials are available, or the review step itself errors, the run emits a **notice annotation** and the job still passes — the caller's CI is never blocked. Set `strict: true` to fail the job with an **error annotation** instead.
+
+### CI Doctor
+
+**`ci-doctor.yml`** — When CI fails on the default branch, Claude reads the failed run's logs and files (or updates) an issue labeled `ci-doctor` with root cause, evidence, and a suggested fix; the next successful run closes it automatically. Claude never gets GitHub write access — issues are managed by plain `gh` calls, and log content is treated as data, not instructions.
+
+```yaml
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+jobs:
+  doctor:
+    if: github.event.workflow_run.head_branch == github.event.repository.default_branch
+    uses: KotaHusky/cicd-toolkit/.github/workflows/ci-doctor.yml@main
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    with:
+      run-id: ${{ github.event.workflow_run.id }}
+      conclusion: ${{ github.event.workflow_run.conclusion }}
+      workflow-name: ${{ github.event.workflow_run.name }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `run-id` | string | — | The completed workflow run to examine (required) |
+| `conclusion` | string | — | `failure` diagnoses; `success` closes open `ci-doctor` issues (required) |
+| `workflow-name` | string | — | Used in the issue title (required) |
+| `model` | string | `claude-haiku-4-5` | Diagnosis model |
+| `max-log-lines` | string | `400` | Log tail sent to the model |
+
+Secrets: `CLAUDE_CODE_OAUTH_TOKEN` (preferred) or `ANTHROPIC_API_KEY`; with neither, a bare tracking issue with the run link is still filed. See [`examples/ci-doctor.yml`](examples/ci-doctor.yml).
 
 ## Setup
 
@@ -616,11 +673,13 @@ See [`examples/`](examples/) for ready-to-copy workflow files:
 - [`aca.yml`](examples/aca.yml) — Azure Container Apps: Bicep provision + image deploy via Azure OIDC
 - [`auto-version.yml`](examples/auto-version.yml) — Automatic versioning + AI release on every merge to main
 - [`cdk-deploy.yml`](examples/cdk-deploy.yml) — CDK synth check on PRs, OIDC deploy on merge to main
+- [`ci-doctor.yml`](examples/ci-doctor.yml) — AI diagnosis issue when default-branch CI goes red; auto-closes on recovery
 - [`ci.yml`](examples/ci.yml) — Build verification + Docker push + commitlint
 - [`claude-review.yml`](examples/claude-review.yml) — Claude PR review (inline comments + sticky summary)
 - [`cloudflare-dns.yml`](examples/cloudflare-dns.yml) — Upsert a Cloudflare DNS record, optional cache purge
 - [`docker-ghcr.yml`](examples/docker-ghcr.yml) — Build a Docker image and push it to GHCR
 - [`ecs-express.yml`](examples/ecs-express.yml) — Tag-driven release for a containerized app on ECS Express Mode
+- [`rollback.yml`](examples/rollback.yml) — One-click redeploy of a previous release tag via workflow_dispatch
 - [`release.yml`](examples/release.yml) — AI-powered release on tag push
 - [`static-site.yml`](examples/static-site.yml) — Tag-driven release for an S3+CloudFront static site
 - [`whats-new-context.md`](examples/whats-new-context.md) — Living context doc powering the end-user what's-new summaries

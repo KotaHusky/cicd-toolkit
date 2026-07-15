@@ -1,0 +1,40 @@
+# AI failure diagnosis for red default-branch CI.
+# Copy to .github/workflows/ci-doctor.yml in your repo and set the
+# `workflows:` list to your CI workflow names.
+#
+# On failure: Claude reads the failed run's logs and files (or updates) an
+# issue labeled `ci-doctor` with root cause, evidence, and a suggested fix.
+# On the next success: the issue is commented and closed automatically.
+# Claude has no GitHub write access — the issue is managed by plain gh calls.
+
+name: CI Doctor
+
+on:
+  workflow_run:
+    workflows:
+      - CI          # your CI workflow name(s)
+    types:
+      - completed
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  doctor:
+    # Diagnose failures / heal on success; ignore cancelled and skipped runs.
+    if: |
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      (github.event.workflow_run.conclusion == 'failure' ||
+       github.event.workflow_run.conclusion == 'success')
+    uses: KotaHusky/cicd-toolkit/.github/workflows/ci-doctor.yml@main
+    with:
+      run-id: ${{ github.event.workflow_run.id }}
+      conclusion: ${{ github.event.workflow_run.conclusion }}
+      workflow-name: ${{ github.event.workflow_run.name }}
+    secrets:
+      # Preferred: Claude Pro/Max OAuth token. Fallback: pay-per-token API key.
+      # Without either, a bare tracking issue is still filed with the run link.
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

@@ -29,8 +29,8 @@ Adapt the example rather than authoring a caller from scratch.
 |---|---|
 | PR build/test/lint for Node (Turborepo-aware) | `build-verify.yml` — also runs an advisory Claude review on PRs when the caller passes `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` (opt out with `claude-review: false`; caller job needs `pull-requests: write` for comments) |
 | Enforce Conventional Commits on PRs | `commitlint.yml` |
-| Build + push Docker image to GHCR | `docker-ghcr.yml` |
-| Deploy AWS CDK app (OIDC auth) | `cdk-deploy.yml` (synth-only check: `cdk-synth.yml`) |
+| Build + push Docker image to GHCR | `docker-ghcr.yml` (opt-in provenance attestations via `attest: true`) |
+| Deploy AWS CDK app (OIDC auth) | `cdk-deploy.yml` (synth-only check: `cdk-synth.yml`, which includes a report-only checkov policy scan by default) |
 | Static site (Next.js/Astro/Vite) → S3 + CloudFront | `static-s3-deploy.yml` |
 | Node/Express app → ECS Fargate | `ecs-express-deploy.yml` / `ecs-express-app-deploy.yml` |
 | Automatic versioning + AI release on every merge to main (recommended) | `auto-version.yml` — computes the semver bump from conventional commits (no checkout, pure API), tags, and runs `release.yml`; pair with `commitlint.yml`. Caller needs `contents: write` |
@@ -38,6 +38,9 @@ Adapt the example rather than authoring a caller from scratch.
 | Claude AI review on every PR (inline + sticky summary) | `claude-review.yml` — needs the [Claude GitHub App](https://github.com/apps/claude) installed and `ANTHROPIC_API_KEY` **or** `CLAUDE_CODE_OAUTH_TOKEN`; advisory by default (never blocks CI), `strict: true` to enforce |
 | Semver tag automation (tag only — does not chain to a release; prefer `auto-version.yml`) | `semver-tag.yml` |
 | End-user "what's new" panel in the app | `release.yml` (whats-new assets) + `whats-new-path` input on `static-s3-deploy.yml`/`docker-ghcr.yml` + `cicd-toolkit/lib/whats-new` — see the What's-New section below |
+| AI diagnosis when default-branch CI goes red (auto-closing issue) | `ci-doctor.yml` — wire via `workflow_run` on the repo's CI workflows; needs `issues: write` + an Anthropic secret. See `examples/ci-doctor.yml` |
+| Staged promotion (dev → prod approval gates) or deployment tracking | `environment` / `track-deployment` inputs on every AWS deploy workflow — see the README's "Environments, Promotion & Rollback" section |
+| Roll back to a previous release | `examples/rollback.yml` — redeploy the old tag via `checkout-ref` |
 | Azure Container Apps | `aca-provision.yml`, `aca-deploy.yml` |
 | Cloudflare DNS management | `cloudflare-dns.yml` |
 
