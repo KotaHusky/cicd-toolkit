@@ -20,6 +20,11 @@ on:
         required: false
         type: string
         default: ''
+      review-test-gaps:
+        description: 'Also analyze test coverage of the changed lines — flags changed code paths whose tests were not updated'
+        required: false
+        type: boolean
+        default: false
       max-turns:
         description: 'Max agent turns per review (cost control)'
         required: false
@@ -131,6 +136,7 @@ jobs:
             summary (overall assessment plus any blocking items).
 
             ${{ inputs.review-prompt }}
+            ${{ inputs.review-test-gaps && 'Additionally, analyze test coverage of this diff: identify changed or added code paths with no corresponding test updates in the PR. Report only the 3 most important gaps, each as file:line plus the specific missing test case. If coverage looks adequate, say so in one line.' || '' }}
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
             --max-turns ${{ inputs.max-turns }}

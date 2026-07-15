@@ -56,6 +56,11 @@ any one consumer project:
   `whats-new.json` generated from the consumer's `.github/whats-new-context.md`,
   sanitized by a judge pass and a deny-list. The context file is a living doc —
   the integrate skill mandates updating it alongside feature changes.
+- `canary.yml` (weekly + on workflow changes) smoke-tests the toolchain the
+  workflows depend on (gh CLI behavior, Claude CLI major, actionlint, script
+  syntax, release/versioning logic) and files a `canary`-labeled issue on
+  drift. `self-ci-doctor.yml` files a `ci-doctor` issue with an AI diagnosis
+  when CI or Auto Version fails on main, and closes it on recovery.
 - Secrets never touch a Claude session — not pasted into chat, not composed into
   commands, not run via the `!` prefix. The user runs
   `pbpaste | gh secret set <NAME> -R KotaHusky/cicd-toolkit` in their own terminal.

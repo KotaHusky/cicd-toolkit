@@ -79,6 +79,28 @@ on:
         required: false
         type: string
         default: ''
+      gh-environment:
+        description: >-
+          GitHub environment name (in the calling repo) to apply to the edge
+          deploy job. Enables environment protection rules (approvals, wait
+          timers) and environment-scoped secrets. Requires the caller to pass
+          `secrets: inherit`. Empty = no environment. Note: the existing
+          `environment` input selects the runtime env (dev|prod); this input
+          controls GitHub environment protection separately.
+        required: false
+        type: string
+        default: ''
+      track-deployment:
+        description: >-
+          Create a GitHub Deployment record (DORA raw data). When true, a
+          Deployment is opened before the CDK edge deploy and a
+          deployment_status of success/failure is posted after. Both steps are
+          best-effort (continue-on-error: true) so tracking never breaks a
+          deploy. Requires the caller's job to have `deployments: write`
+          permission — add it to the calling workflow's job permissions block.
+        required: false
+        type: boolean
+        default: false
     secrets:
       role-arn:
         required: true
@@ -224,6 +246,7 @@ jobs:
     # skipped real infra changes.
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: ${{ inputs.gh-environment }}
     permissions:
       id-token: write
       contents: read
@@ -264,7 +287,31 @@ jobs:
         with:
           path: infra/node_modules
           key: infra-nm-${{ runner.os }}-${{ hashFiles('infra/package-lock.json') }}
+      - name: Create GitHub Deployment (DORA tracking)
+        id: gh-deploy
+        if: inputs.track-deployment
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_ENV: ${{ inputs.gh-environment || needs.config.outputs.env || 'production' }}
+          DEPLOY_REF: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Callers must grant `deployments: write` on their job; without it
+          # this step is skipped gracefully via continue-on-error.
+          DEPLOY_ID=$(gh api "repos/${REPO}/deployments" \
+            -f ref="${DEPLOY_REF}" \
+            -f environment="${DEPLOY_ENV}" \
+            -F auto_merge=false \
+            -f required_contexts='[]' \
+            -f description='ECS Express App Deploy started' \
+            --jq '.id')
+          echo "deployment-id=${DEPLOY_ID}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Deployment tracking::Created GitHub Deployment ${DEPLOY_ID} for ${DEPLOY_ENV}. Requires deployments: write on the calling job."
+
       - name: Deploy edge stack (${{ needs.config.outputs.env }})
+        id: edge-deploy
         working-directory: infra
         run: |
           npm ci --prefer-offline
@@ -283,3 +330,22 @@ jobs:
             -c targetGroupFullName='${{ steps.ids.outputs.tg }}' \
             -c ecsClusterName='${{ steps.ids.outputs.cluster }}' \
             -c ecsServiceName='${{ steps.ids.outputs.service }}'
+
+      - name: Post GitHub Deployment status (DORA tracking)
+        if: always() && inputs.track-deployment && steps.gh-deploy.outputs.deployment-id != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DEPLOY_ID: ${{ steps.gh-deploy.outputs.deployment-id }}
+          EDGE_OUTCOME: ${{ steps.edge-deploy.outcome }}
+        run: |
+          set -euo pipefail
+          STATE="failure"
+          if [ "${EDGE_OUTCOME}" = "success" ]; then
+            STATE="success"
+          fi
+          gh api "repos/${REPO}/deployments/${DEPLOY_ID}/statuses" \
+            -f state="${STATE}" \
+            -f description="ECS Express App Deploy ${STATE}"
+          echo "::notice title=Deployment tracking::Posted deployment_status=${STATE} for deployment ${DEPLOY_ID}."

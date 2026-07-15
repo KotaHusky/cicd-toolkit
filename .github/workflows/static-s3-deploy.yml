@@ -74,6 +74,26 @@ on:
         required: false
         type: string
         default: ''
+      environment:
+        description: >-
+          GitHub environment name (in the calling repo) to apply to the deploy
+          job. Enables environment protection rules (approvals, wait timers) and
+          environment-scoped secrets. Requires the caller to pass
+          `secrets: inherit`. Empty = no environment.
+        required: false
+        type: string
+        default: ''
+      track-deployment:
+        description: >-
+          Create a GitHub Deployment record (DORA raw data). When true, a
+          Deployment is opened before the deploy and a deployment_status of
+          success/failure is posted after. Both steps are best-effort
+          (continue-on-error: true) so tracking never breaks a deploy.
+          Requires the caller's job to have `deployments: write` permission —
+          add it to the calling workflow's job permissions block.
+        required: false
+        type: boolean
+        default: false
     secrets:
       role-arn:
         description: 'IAM role ARN for AWS authentication via OIDC'
@@ -99,6 +119,7 @@ jobs:
     name: Deploy static site
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: ${{ inputs.environment }}
     outputs:
       invalidation-id: ${{ steps.invalidate.outputs.invalidation-id }}
       objects-uploaded: ${{ steps.sync.outputs.objects-uploaded }}
@@ -159,6 +180,29 @@ jobs:
           role-to-assume: ${{ secrets.role-arn }}
           aws-region: ${{ inputs.aws-region }}
 
+      - name: Create GitHub Deployment (DORA tracking)
+        id: gh-deploy
+        if: inputs.track-deployment
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_ENV: ${{ inputs.environment || 'production' }}
+          DEPLOY_REF: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Callers must grant `deployments: write` on their job; without it
+          # this step is skipped gracefully via continue-on-error.
+          DEPLOY_ID=$(gh api "repos/${REPO}/deployments" \
+            -f ref="${DEPLOY_REF}" \
+            -f environment="${DEPLOY_ENV}" \
+            -F auto_merge=false \
+            -f required_contexts='[]' \
+            -f description='Static site deploy started' \
+            --jq '.id')
+          echo "deployment-id=${DEPLOY_ID}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Deployment tracking::Created GitHub Deployment ${DEPLOY_ID} for ${DEPLOY_ENV}. Requires deployments: write on the calling job."
+
       - name: Sync build output to S3
         id: sync
         shell: bash
@@ -204,6 +248,26 @@ jobs:
             --query 'Invalidation.Id' \
             --output text)
           echo "invalidation-id=${INV_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Post GitHub Deployment status (DORA tracking)
+        if: always() && inputs.track-deployment && steps.gh-deploy.outputs.deployment-id != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DEPLOY_ID: ${{ steps.gh-deploy.outputs.deployment-id }}
+          SYNC_OUTCOME: ${{ steps.sync.outcome }}
+          INVALIDATE_OUTCOME: ${{ steps.invalidate.outcome }}
+        run: |
+          set -euo pipefail
+          STATE="failure"
+          if [ "${SYNC_OUTCOME}" = "success" ] && [ "${INVALIDATE_OUTCOME}" = "success" ]; then
+            STATE="success"
+          fi
+          gh api "repos/${REPO}/deployments/${DEPLOY_ID}/statuses" \
+            -f state="${STATE}" \
+            -f description="Static site deploy ${STATE}"
+          echo "::notice title=Deployment tracking::Posted deployment_status=${STATE} for deployment ${DEPLOY_ID}."
 
       - name: Summarize deployment
         shell: bash
