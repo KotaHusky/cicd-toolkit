@@ -1,0 +1,48 @@
+name: Publish @kotahusky/cognito-invite-gating
+
+on:
+  push:
+    tags:
+      - 'cognito-invite-gating/v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 1.0.0). Defaults to version in package.json.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build & Publish
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/invite-gating
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@kotahusky'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (Lambda ZIPs + TypeScript)
+        run: npm run build
+
+      - name: Bump version (workflow_dispatch only)
+        if: inputs.version != ''
+        run: npm version ${{ inputs.version }} --no-git-tag-version
+
+      - name: Publish
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

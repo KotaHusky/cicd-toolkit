@@ -1,10 +1,13 @@
 {
-  "name": "@cicd-toolkit/invite-gating",
+  "name": "@kotahusky/cognito-invite-gating",
   "version": "1.0.0",
   "description": "CDK L3 construct: invite-code gating for Cognito user pools",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": ["dist/**", "assets/**"],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "scripts": {
     "build": "node build.mjs && tsc",
     "prepare": "node build.mjs && tsc",

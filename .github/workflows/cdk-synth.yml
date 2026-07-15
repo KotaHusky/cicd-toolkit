@@ -28,6 +28,10 @@ on:
         required: false
         type: boolean
         default: true
+    secrets:
+      node-auth-token:
+        description: 'Token for installing private GitHub Packages (npm) deps. Optional.'
+        required: false
 
 concurrency:
   group: cdk-synth-${{ github.workflow }}-${{ github.ref }}
@@ -37,6 +41,8 @@ jobs:
   synth:
     name: CDK Synth
     runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.node-auth-token }}
     steps:
       - uses: actions/checkout@v7
 
