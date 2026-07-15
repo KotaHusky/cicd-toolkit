@@ -222,7 +222,7 @@ Bump rules (matching semantic-release defaults): `feat!:`/`BREAKING CHANGE` → 
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `initial-version` | string | `0.1.0` | First release when no semver tag exists yet |
+| `initial-version` | string | `0.1.0` | First release when no semver tag exists yet (fires only once a releasable commit is present — a `chore:`-only history releases nothing) |
 | `dry-run` | boolean | `false` | Report the computed bump without tagging or releasing |
 | `floating-tags` | boolean | `false` | Advance floating `vN` / `vN.M` tags after the release (for repos consumed at a floating ref; leave off for apps) |
 | `model` / `draft` / `app-context` / `whats-new` / `auto-publish` | — | — | Forwarded to `release.yml` (see above) |

@@ -133,43 +133,51 @@ jobs:
             exit 0
           fi
 
+          # Non-merge commit messages in the release range: everything since
+          # the last tag, or (first release) the last 100 commits on the
+          # branch. The compare API returns at most 250 commits; warn rather
+          # than misversion.
           if [ -z "$LAST" ]; then
-            BUMP="minor"
-            NEW="v${INITIAL}"
-            echo "No semver tag found — first release will be ${NEW}."
+            RANGE=$(gh api "repos/${REPO}/commits?sha=${SHA}&per_page=100" \
+              --jq '[.[] | select(.parents | length == 1) | .commit.message]')
           else
-            # Non-merge commit messages since the last tag. The compare API
-            # returns at most 250 commits; warn rather than misversion.
             COMPARE=$(gh api "repos/${REPO}/compare/${LAST}...${SHA}")
             TOTAL=$(echo "$COMPARE" | jq '.total_commits')
             if [ "$TOTAL" -gt 250 ]; then
               echo "::warning title=auto-version::${TOTAL} commits since ${LAST} but only 250 inspected — bump may be understated. Consider tagging manually."
             fi
-            MESSAGES=$(echo "$COMPARE" \
-              | jq -r '.commits[] | select(.parents | length == 1) | .commit.message')
-            SUBJECTS=$(echo "$COMPARE" \
-              | jq -r '.commits[] | select(.parents | length == 1) | .commit.message | split("\n")[0]')
+            RANGE=$(echo "$COMPARE" \
+              | jq '[.commits[] | select(.parents | length == 1) | .commit.message]')
+          fi
+          MESSAGES=$(echo "$RANGE" | jq -r '.[]')
+          SUBJECTS=$(echo "$RANGE" | jq -r '.[] | split("\n")[0]')
 
-            BUMP="none"
-            # Breaking markers: a bang type (feat!:) in a subject, or a
-            # BREAKING CHANGE / BREAKING-CHANGE footer line — anchored so
-            # prose that merely mentions the phrase can't force a major.
-            if printf '%s' "$SUBJECTS" | grep -qE '^[a-z]+(\([^)]*\))?!:' \
-               || printf '%s' "$MESSAGES" | grep -qE '^BREAKING[ -]CHANGE:'; then
-              BUMP="major"
-            elif printf '%s' "$SUBJECTS" | grep -qE '^feat(\([^)]*\))?:'; then
-              BUMP="minor"
-            elif printf '%s' "$SUBJECTS" | grep -qE '^(fix|perf|revert)(\([^)]*\))?:'; then
-              BUMP="patch"
-            fi
+          BUMP="none"
+          # Breaking markers: a bang type (feat!:) in a subject, or a
+          # BREAKING CHANGE / BREAKING-CHANGE footer line — anchored so
+          # prose that merely mentions the phrase can't force a major.
+          if printf '%s' "$SUBJECTS" | grep -qE '^[a-z]+(\([^)]*\))?!:' \
+             || printf '%s' "$MESSAGES" | grep -qE '^BREAKING[ -]CHANGE:'; then
+            BUMP="major"
+          elif printf '%s' "$SUBJECTS" | grep -qE '^feat(\([^)]*\))?:'; then
+            BUMP="minor"
+          elif printf '%s' "$SUBJECTS" | grep -qE '^(fix|perf|revert)(\([^)]*\))?:'; then
+            BUMP="patch"
+          fi
 
-            if [ "$BUMP" = "none" ]; then
-              echo "bump=none" >> "$GITHUB_OUTPUT"
-              echo "tag=" >> "$GITHUB_OUTPUT"
-              echo "::notice title=auto-version::No feat/fix/perf/breaking commits since ${LAST} — nothing to release."
-              exit 0
-            fi
+          if [ "$BUMP" = "none" ]; then
+            echo "bump=none" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "::notice title=auto-version::No feat/fix/perf/breaking commits ${LAST:+since ${LAST} }— nothing to release."
+            exit 0
+          fi
 
+          if [ -z "$LAST" ]; then
+            # First release: bootstrap at initial-version regardless of the
+            # bump size, but only once a releasable commit exists (above).
+            NEW="v${INITIAL}"
+            echo "No semver tag found — first release will be ${NEW} (${BUMP} commit present)."
+          else
             IFS='.' read -r MAJOR MINOR PATCH <<< "${LAST#v}"
             case "$BUMP" in
               major) NEW="v$((MAJOR + 1)).0.0" ;;
