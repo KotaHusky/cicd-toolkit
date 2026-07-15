@@ -30,6 +30,7 @@ to integrate all of it themselves.
 | Conventional-commit enforcement | [`commitlint.yml`](#commitlint) | The contract that powers automatic versioning |
 | Container images | [`docker-ghcr.yml`](#docker-build--push-to-ghcr) | BuildKit provenance; opt-in [attestations](#docker-build--push-to-ghcr) |
 | Deploy: AWS CDK | [`cdk-deploy.yml`](#cdk-deploy) + [`cdk-synth.yml`](#cdk-deploy) PR check | OIDC auth; default-on report-only [checkov policy scan](#cdk-deploy) |
+| Per-PR preview environments | [`preview-s3-deploy.yml`](#preview-environments) | Sticky preview URL; auto-teardown on close; needs base-path-aware builds |
 | Deploy: static sites | [`static-s3-deploy.yml`](#static-site-deploy-s3--cloudfront) | S3 + CloudFront + cache strategy |
 | Deploy: containers on ECS | [`ecs-express-deploy.yml` / `ecs-express-app-deploy.yml`](#ecs-express-deploy) | GHCR→ECR mirror, edge stack, dev/prod |
 | Deploy: Azure Container Apps | [`aca-provision.yml` + `aca-deploy.yml`](#azure-container-apps) | Bicep + Azure OIDC |
@@ -50,7 +51,8 @@ to integrate all of it themselves.
   - [Docker Build & Push to GHCR](#docker-build--push-to-ghcr)
   - [CDK Deploy](#cdk-deploy)
   - [Static Site Deploy (S3 + CloudFront)](#static-site-deploy-s3--cloudfront)
-  - [ECS Express Deploy](#ecs-express-deploy)
+    - [Preview Environments](#preview-environments)
+- [ECS Express Deploy](#ecs-express-deploy)
   - [Azure Container Apps](#azure-container-apps)
   - [Cloudflare DNS](#cloudflare-dns)
   - [Environments, Promotion & Rollback](#environments-promotion--rollback)
@@ -245,6 +247,32 @@ jobs:
 |--------|-------------|
 | `invalidation-id` | CloudFront invalidation ID |
 | `objects-uploaded` | Count of objects synced (parsed from CLI output) |
+
+### Preview Environments
+
+**`preview-s3-deploy.yml`** — Per-PR preview deploys for static sites: each PR's build lands at `s3://<bucket>/previews/pr-<N>/`, a sticky comment posts the preview URL, and closing the PR tears the prefix down. Pairs with the production `static-s3-deploy.yml` on the same bucket/distribution.
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+jobs:
+  preview:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/preview-s3-deploy.yml@main
+    permissions:
+      id-token: write   # OIDC to AWS
+      contents: read
+      pull-requests: write   # sticky preview-URL comment
+    with:
+      bucket-name: my-site-bucket
+      distribution-id: E1234567ABCDEF
+      preview-domain: site.example.com
+    secrets:
+      role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+```
+
+Two consumer requirements: the app's build must honor `PREVIEW_BASE_PATH` (exported as `/previews/pr-<N>` before the build — e.g. Next.js `basePath: process.env.PREVIEW_BASE_PATH ?? ''`), and the serving `StaticSiteStack` needs `previewIndexRewrite: true` so CloudFront resolves directory indexes under subpaths. Inputs mirror `static-s3-deploy.yml` (node-version, package-manager, build-command, build-output-dir, working-directory, build-args) plus `preview-domain` (required). Output: `preview-url`. Teardown deletes only the PR's own `previews/pr-<N>` prefix (pattern-guarded) and updates the comment. See [`examples/preview-env.yml`](examples/preview-env.yml).
 
 ### ECS Express Deploy
 
@@ -767,6 +795,7 @@ See [`examples/`](examples/) for ready-to-copy workflow files:
 - [`docker-ghcr.yml`](examples/docker-ghcr.yml) — Build a Docker image and push it to GHCR
 - [`ecs-express.yml`](examples/ecs-express.yml) — Tag-driven release for a containerized app on ECS Express Mode
 - [`rollback.yml`](examples/rollback.yml) — One-click redeploy of a previous release tag via workflow_dispatch
+- [`preview-env.yml`](examples/preview-env.yml) — Per-PR static-site preview deploys with auto-teardown
 - [`release.yml`](examples/release.yml) — AI-powered release on tag push
 - [`static-site.yml`](examples/static-site.yml) — Tag-driven release for an S3+CloudFront static site
 - [`whats-new-context.md`](examples/whats-new-context.md) — Living context doc powering the end-user what's-new summaries
