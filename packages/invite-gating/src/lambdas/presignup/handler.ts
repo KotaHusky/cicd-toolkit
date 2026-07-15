@@ -17,6 +17,15 @@ export async function handler(event: PreSignUpTriggerEvent): Promise<PreSignUpTr
     return event;
   }
 
+  // Known limitation: Cognito fires PreSignUp BEFORE email confirmation, so a
+  // user who begins signup with a valid code but never confirms (or abandons)
+  // permanently consumes that code. Unconfirmed users are eventually purged by
+  // Cognito, but the code record remains USED with no corresponding active
+  // account and no reclaim path (revoke refuses USED codes). If claim-on-
+  // confirm semantics are required, move the atomic UpdateCommand to a
+  // PostConfirmation trigger and make this handler validation-only
+  // (non-mutating attribute_exists check), accepting a small double-claim race.
+
   const code = event.request.userAttributes['custom:inviteCode'] ?? '';
 
   if (!CODE_RE.test(code)) {
@@ -42,7 +51,11 @@ export async function handler(event: PreSignUpTriggerEvent): Promise<PreSignUpTr
         },
       }),
     );
-  } catch {
+  } catch (err) {
+    // Fail closed — user never sees the underlying reason (no code-existence
+    // oracle), but operators need the real error to distinguish a bad code from
+    // a transient DynamoDB throttle or IAM misconfiguration.
+    console.error('Invite code claim failed', err);
     throw new Error('Invalid invite code');
   }
 
