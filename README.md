@@ -812,7 +812,9 @@ Self-contained L3 construct (the first resident of `packages/`, with its own bui
 import { InviteGating } from '@cicd-toolkit/invite-gating';
 
 new InviteGating(this, 'InviteGating', {
-  userPool,           // attaches the pre-signup trigger
+  userPool,                    // attaches the pre-signup trigger
+  resourcePrefix: 'my-app',    // names the table/Lambdas/runbook
+  appDomain: 'app.example.com',
 });
 ```
 

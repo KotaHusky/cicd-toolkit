@@ -42,6 +42,17 @@ jobs:
             DIR=$(dirname "$PKG")
             echo "::group::${DIR}"
             (cd "$DIR" && npm ci && npm test)
+            # Asset-drift guard: consumers deploy the COMMITTED zips, so a
+            # source edit without a rebuild would silently ship stale Lambda
+            # code. Zip bytes are timestamp-nondeterministic; the bundled
+            # inner content is deterministic, so compare that.
+            if compgen -G "$DIR/assets/*.zip" > /dev/null; then
+              for Z in "$DIR"/assets/*.zip; do unzip -p "$Z" | shasum -a 256; done > /tmp/assets-before.txt
+              (cd "$DIR" && npm run build > /dev/null)
+              for Z in "$DIR"/assets/*.zip; do unzip -p "$Z" | shasum -a 256; done > /tmp/assets-after.txt
+              diff /tmp/assets-before.txt /tmp/assets-after.txt \
+                || { echo "::error title=asset-drift::Committed Lambda zips in $DIR/assets don't match a fresh build — run npm run build there and commit the zips."; exit 1; }
+            fi
             echo "::endgroup::"
           done
 
