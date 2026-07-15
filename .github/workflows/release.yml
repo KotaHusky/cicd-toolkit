@@ -253,7 +253,7 @@ jobs:
 
       - name: Upload changelog artifact
         if: ${{ inputs.whats-new }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-changelog
           path: /tmp/changelog.txt
@@ -291,7 +291,7 @@ jobs:
           fi
 
       - name: Download changelog artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-changelog
           path: .whats-new-work
