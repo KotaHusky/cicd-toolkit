@@ -55,14 +55,15 @@ jobs:
           set -euo pipefail
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}"
 
-          # Search open issues labeled ci-doctor whose title contains the workflow name.
-          # jq --arg is safe — WORKFLOW_NAME never touches a shell expansion here.
+          # Search open issues labeled ci-doctor whose title contains the workflow
+          # name. gh's --jq takes a single filter (no --arg passthrough); the
+          # step-level WORKFLOW_NAME env var is read via jq's env accessor, so
+          # the value never touches shell or filter interpolation.
           ISSUE_NUMBERS=$(gh issue list \
             --label "ci-doctor" \
             --state open \
             --json number,title \
-            --jq --arg name "${WORKFLOW_NAME}" \
-              '[.[] | select(.title | contains($name))] | .[].number')
+            --jq '[.[] | select(.title | contains(env.WORKFLOW_NAME))] | .[].number')
 
           if [ -z "${ISSUE_NUMBERS}" ]; then
             echo "No open ci-doctor issues found for workflow '${WORKFLOW_NAME}' — nothing to close."
@@ -291,8 +292,7 @@ jobs:
             --label "ci-doctor" \
             --state open \
             --json number,title \
-            --jq --arg name "${WORKFLOW_NAME}" \
-              '[.[] | select(.title | contains($name))] | .[0].number // ""')
+            --jq '[.[] | select(.title | contains(env.WORKFLOW_NAME))] | .[0].number // ""')
 
           if [ -n "${EXISTING}" ]; then
             echo "Updating existing issue #${EXISTING} with new diagnosis."

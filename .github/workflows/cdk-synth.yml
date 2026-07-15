@@ -111,9 +111,13 @@ jobs:
               ${SOFT_FAIL_FLAG}
           fi
 
-          # Summarize findings into the job summary.
-          FAILED_COUNT=$(grep -c '^- FAILED' "${SCAN_OUTPUT_FILE}" 2>/dev/null || echo 0)
-          PASSED_COUNT=$(grep -c '^- PASSED' "${SCAN_OUTPUT_FILE}" 2>/dev/null || echo 0)
+          # Summarize findings from checkov's own summary line
+          # ("Passed checks: N, Failed checks: M, ...") — grep -c both exits
+          # non-zero AND prints 0 on no match, so it can't be used here.
+          PASSED_COUNT=$(sed -n 's/.*Passed checks: \([0-9][0-9]*\).*/\1/p' "${SCAN_OUTPUT_FILE}" | head -n 1)
+          FAILED_COUNT=$(sed -n 's/.*Failed checks: \([0-9][0-9]*\).*/\1/p' "${SCAN_OUTPUT_FILE}" | head -n 1)
+          PASSED_COUNT=${PASSED_COUNT:-0}
+          FAILED_COUNT=${FAILED_COUNT:-0}
           {
             echo "## Policy Scan Results (checkov)"
             echo ""
