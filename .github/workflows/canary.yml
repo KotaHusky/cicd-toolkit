@@ -1,0 +1,362 @@
+name: Canary — Toolchain Drift
+
+# Catches regressions in the runner environment, gh CLI, npm registry, and
+# release-pipeline logic BEFORE consumers hit them. Two recent production
+# breaks (gh CLI rejecting --slurp+--jq; actions/checkout fatal on tag push)
+# would have been caught here first.
+#
+# Jobs run in parallel. On a scheduled run the `report` job opens or updates
+# a GitHub issue labeled `canary` when any job fails, and comments+closes it
+# when all pass.
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # Monday 09:00 UTC
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1 — actionlint over all reusable workflows
+  # ---------------------------------------------------------------------------
+  lint-workflows:
+    name: Lint workflows (actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download and verify actionlint
+        run: |
+          set -euo pipefail
+          VERSION="1.7.12"
+          ARCHIVE="actionlint_${VERSION}_linux_amd64.tar.gz"
+          EXPECTED_SHA256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+
+          curl -fsSL \
+            "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/${ARCHIVE}" \
+            -o "/tmp/${ARCHIVE}"
+
+          ACTUAL=$(sha256sum "/tmp/${ARCHIVE}" | awk '{print $1}')
+          if [ "$ACTUAL" != "$EXPECTED_SHA256" ]; then
+            echo "::error title=actionlint::Checksum mismatch — expected ${EXPECTED_SHA256}, got ${ACTUAL}"
+            exit 1
+          fi
+
+          tar -xzf "/tmp/${ARCHIVE}" -C /usr/local/bin actionlint
+          actionlint --version
+
+      - name: Run actionlint
+        run: |
+          set -euo pipefail
+          actionlint .github/workflows/*.yml
+
+  # ---------------------------------------------------------------------------
+  # Job 2 — bash -n syntax check on every run: block
+  # ---------------------------------------------------------------------------
+  script-syntax:
+    name: Script syntax (bash -n)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Extract and bash -n each run block
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEOF'
+          import re
+          import subprocess
+          import sys
+          import os
+          import yaml
+
+          EXPR_RE = re.compile(r'\$\{\{[^}]*\}\}')
+          PLACEHOLDER = '__EXPR__'
+
+          failed = []
+          workflows_dir = '.github/workflows'
+
+          for fname in sorted(os.listdir(workflows_dir)):
+              if not fname.endswith('.yml') and not fname.endswith('.yaml'):
+                  continue
+              fpath = os.path.join(workflows_dir, fname)
+              with open(fpath) as fh:
+                  try:
+                      doc = yaml.safe_load(fh)
+                  except yaml.YAMLError as e:
+                      print(f'YAML parse error in {fname}: {e}', file=sys.stderr)
+                      failed.append((fname, '<yaml-parse>', str(e)))
+                      continue
+
+              if not isinstance(doc, dict):
+                  continue
+
+              # Walk all jobs → steps (both top-level and composite actions)
+              jobs = doc.get('jobs') or doc.get('runs', {}).get('steps') and {'_composite': {'steps': doc['runs']['steps']}} or {}
+              for job_name, job in (jobs or {}).items():
+                  if not isinstance(job, dict):
+                      continue
+                  steps = job.get('steps') or []
+                  for i, step in enumerate(steps):
+                      if not isinstance(step, dict):
+                          continue
+                      run_block = step.get('run')
+                      if not run_block:
+                          continue
+                      # Substitute all ${{ ... }} expressions so bash -n
+                      # doesn't choke on GitHub Actions interpolation syntax.
+                      sanitised = EXPR_RE.sub(f'"{PLACEHOLDER}"', run_block)
+                      result = subprocess.run(
+                          ['bash', '-n'],
+                          input=sanitised,
+                          capture_output=True,
+                          text=True
+                      )
+                      if result.returncode != 0:
+                          step_name = step.get('name', f'step[{i}]')
+                          print(f'FAIL  {fname} / job:{job_name} / {step_name}')
+                          print(result.stderr)
+                          failed.append((fname, f'job:{job_name}/{step_name}', result.stderr.strip()))
+
+          if failed:
+              print('\nSyntax errors found in the following run blocks:')
+              for wf, step, err in failed:
+                  print(f'  {wf}  {step}')
+              sys.exit(1)
+          else:
+              print(f'All run blocks in {workflows_dir}/*.yml passed bash -n.')
+          PYEOF
+
+  # ---------------------------------------------------------------------------
+  # Job 3 — smoke the review-threads gate (gh api graphql --paginate --slurp)
+  # ---------------------------------------------------------------------------
+  gate-smoke:
+    name: Gate smoke (gh graphql + jq)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Replay review-threads gate against merged PR 76
+        run: |
+          set -euo pipefail
+          # Exact same technique as build-verify.yml / claude-review.yml:
+          # --paginate + --slurp without --jq, piped to standalone jq.
+          # gh rejects --slurp combined with --jq; standalone jq handles it.
+          # Running against a merged PR lets us verify the round trip without
+          # any open/unresolved thread state to worry about.
+          set +e
+          RAW=$(gh api graphql --paginate --slurp \
+              -f owner="KotaHusky" \
+              -f repo="cicd-toolkit" \
+              -F pr=76 \
+              -f query='query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $pr) {
+                    reviewThreads(first: 100, after: $endCursor) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes { isResolved }
+                    }
+                  }
+                }
+              }' 2>/tmp/gate-err.txt)
+          STATUS=$?
+          if [ "$STATUS" -eq 0 ]; then
+            THREADS=$(printf '%s' "$RAW" | jq \
+              '[.[].data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length' \
+              2>>/tmp/gate-err.txt)
+            STATUS=$?
+          fi
+          set -e
+
+          if [ "$STATUS" -ne 0 ]; then
+            ERR=$(cat /tmp/gate-err.txt 2>/dev/null || true)
+            echo "::error title=gate-smoke::gh graphql or jq failed. Error: ${ERR:-$RAW}"
+            exit 1
+          fi
+
+          # Assert the output is a non-negative integer — proving the pipeline
+          # produced parseable output, not that the thread count is any value.
+          if ! printf '%s' "$THREADS" | grep -qE '^[0-9]+$'; then
+            echo "::error title=gate-smoke::Expected a non-negative integer from jq, got: ${THREADS}"
+            exit 1
+          fi
+
+          echo "gate-smoke passed — jq returned: ${THREADS} unresolved thread(s) (PR #76 is merged so 0 is normal)"
+
+  # ---------------------------------------------------------------------------
+  # Job 4 — CLI tool versions (claude-code, gh, jq)
+  # ---------------------------------------------------------------------------
+  cli-smoke:
+    name: CLI smoke (claude-code, gh, jq)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: claude-code --version (catches pinned major disappearing)
+        run: |
+          set -euo pipefail
+          npx --yes @anthropic-ai/claude-code@2 --version
+
+      - name: gh and jq versions
+        run: |
+          set -euo pipefail
+          echo "gh version:"
+          gh --version
+          echo "jq version:"
+          jq --version
+
+  # ---------------------------------------------------------------------------
+  # Job 5 — release-logic smoke (previous-tag pipeline + auto-version bump)
+  # ---------------------------------------------------------------------------
+  release-logic-smoke:
+    name: Release logic smoke (tag + bump)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      # Shallow — fetch-tags: true is fatal on tag-push events
+      # (actions/checkout#1467); git ls-remote needs no local tags.
+      - uses: actions/checkout@v7
+
+      - name: Replay previous-tag pipeline (release.yml)
+        run: |
+          set -euo pipefail
+          # Exact logic from release.yml's "Gather changelog" step.
+          PREVIOUS_TAG=$(git ls-remote --tags origin \
+            | awk '{print $2}' \
+            | sed -e 's|^refs/tags/||' -e 's|\^{}$||' \
+            | sort -u -V \
+            | { grep -E '^v[0-9]' || true; } \
+            | tail -n 1)
+
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "::error title=release-logic-smoke::No v* tag found — this repo should have at least one semver tag."
+            exit 1
+          fi
+          echo "previous-tag-smoke passed — latest tag: ${PREVIOUS_TAG}"
+
+      - name: Replay auto-version bump detection (dry-run, no tags created)
+        run: |
+          set -euo pipefail
+          # Reproduces auto-version.yml's bump detection in pure dry-run:
+          # latest full-semver tag via tags API, then commit subject scan
+          # via compare API, then classify as major/minor/patch/none.
+          # No git refs are created; no releases are triggered.
+
+          LAST=$(gh api --paginate "repos/${REPO}/tags" --jq '.[].name' \
+            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+            | sort -V | tail -n 1)
+
+          SHA="${{ github.sha }}"
+
+          if [ -z "$LAST" ]; then
+            SUBJECTS=$(gh api "repos/${REPO}/commits?sha=${SHA}&per_page=100" \
+              --jq '[.[] | select(.parents | length == 1) | .commit.message] | .[] | split("\n")[0]')
+            MESSAGES=$(gh api "repos/${REPO}/commits?sha=${SHA}&per_page=100" \
+              --jq '[.[] | select(.parents | length == 1) | .commit.message] | .[]')
+          else
+            COMPARE=$(gh api "repos/${REPO}/compare/${LAST}...${SHA}")
+            SUBJECTS=$(echo "$COMPARE" \
+              | jq -r '[.commits[] | select(.parents | length == 1) | .commit.message] | .[] | split("\n")[0]')
+            MESSAGES=$(echo "$COMPARE" \
+              | jq -r '[.commits[] | select(.parents | length == 1) | .commit.message] | .[]')
+          fi
+
+          BUMP="none"
+          # Breaking: bang type or BREAKING CHANGE footer (anchored)
+          if printf '%s' "$SUBJECTS" | grep -qE '^[a-z]+(\([^)]*\))?!:' \
+             || printf '%s' "$MESSAGES" | grep -qE '^BREAKING[ -]CHANGE:'; then
+            BUMP="major"
+          elif printf '%s' "$SUBJECTS" | grep -qE '^feat(\([^)]*\))?:'; then
+            BUMP="minor"
+          elif printf '%s' "$SUBJECTS" | grep -qE '^(fix|perf|revert)(\([^)]*\))?:'; then
+            BUMP="patch"
+          fi
+
+          # Validate the result is one of the four expected values.
+          case "$BUMP" in
+            major|minor|patch|none)
+              echo "auto-version-smoke passed — computed BUMP=${BUMP} (dry-run, no tag created)"
+              ;;
+            *)
+              echo "::error title=release-logic-smoke::BUMP has unexpected value: ${BUMP}"
+              exit 1
+              ;;
+          esac
+
+  # ---------------------------------------------------------------------------
+  # Job 6 — report: open/update or close the canary issue
+  # ---------------------------------------------------------------------------
+  report:
+    name: Report canary status
+    needs: [lint-workflows, script-syntax, gate-smoke, cli-smoke, release-logic-smoke]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Evaluate job results and manage canary issue
+        run: |
+          set -euo pipefail
+
+          LINT="${{ needs.lint-workflows.result }}"
+          SYNTAX="${{ needs.script-syntax.result }}"
+          GATE="${{ needs.gate-smoke.result }}"
+          CLI="${{ needs.cli-smoke.result }}"
+          RELEASE="${{ needs.release-logic-smoke.result }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          FAILED_JOBS=""
+          for entry in "lint-workflows:${LINT}" "script-syntax:${SYNTAX}" "gate-smoke:${GATE}" "cli-smoke:${CLI}" "release-logic-smoke:${RELEASE}"; do
+            JOB="${entry%%:*}"
+            RESULT="${entry##*:}"
+            if [ "$RESULT" != "success" ]; then
+              FAILED_JOBS="${FAILED_JOBS}  - \`${JOB}\` (${RESULT})\n"
+            fi
+          done
+
+          ISSUE_TITLE="Canary: workflow toolchain drift detected"
+          LABEL="canary"
+
+          # Find an existing open issue with the canary label (dedup)
+          EXISTING_ISSUE=$(gh issue list \
+            --label "$LABEL" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty' 2>/dev/null || true)
+
+          if [ -n "$FAILED_JOBS" ]; then
+            BODY="$(printf '## Canary failure\n\nOne or more canary jobs failed in run [%s](%s).\n\n### Failed jobs\n\n%b\n### Next steps\n\nInvestigate the linked run. If the failure is a real regression (runner image, gh CLI, npm registry, or release logic changed), fix the workflow and push to main — the canary will close the issue automatically on the next passing run.\n' \
+              "${{ github.run_id }}" "$RUN_URL" "$FAILED_JOBS")"
+
+            if [ -n "$EXISTING_ISSUE" ]; then
+              echo "Updating existing canary issue #${EXISTING_ISSUE}"
+              gh issue comment "$EXISTING_ISSUE" --body "$BODY"
+            else
+              echo "Opening new canary issue"
+              gh issue create \
+                --title "$ISSUE_TITLE" \
+                --body "$BODY" \
+                --label "$LABEL"
+            fi
+          else
+            echo "All canary jobs passed."
+            if [ -n "$EXISTING_ISSUE" ]; then
+              echo "Closing resolved canary issue #${EXISTING_ISSUE}"
+              gh issue comment "$EXISTING_ISSUE" \
+                --body "All canary jobs passed in run [#${{ github.run_id }}](${RUN_URL}). Closing."
+              gh issue close "$EXISTING_ISSUE" --reason completed
+            fi
+          fi
