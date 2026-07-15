@@ -135,24 +135,30 @@ jobs:
           echo "Changelog:"
           cat /tmp/changelog.txt
 
+      # Claude Code CLI rather than claude-code-action: the action rejects
+      # push events (both tag pushes and auto-version's main pushes arrive
+      # as push), while the CLI is event-agnostic, honors the same OAuth
+      # token, and has no default-branch workflow-file guard.
       - name: Generate release notes with Claude (OAuth)
         if: steps.auth.outputs.mode == 'oauth'
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ github.token }}
-          prompt: |
-            Read the commit log at .release-work/changelog.txt, then write
-            exactly two files and do nothing else:
-            - .release-work/title.txt — a very short title (3-5 words)
-              summarizing the release theme. No version number. Single line.
-            - .release-work/summary.txt — a concise paragraph (2-4 sentences)
-              describing what changed, written for engineers.
-            Do not post comments and do not modify any other file.
-          claude_args: |
-            --allowedTools "Read,Write"
-            --max-turns 6
-            --model ${{ inputs.model }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/notes-prompt.txt <<'PROMPT'
+          Read the commit log at .release-work/changelog.txt, then write
+          exactly two files and do nothing else:
+          - .release-work/title.txt — a very short title (3-5 words)
+            summarizing the release theme. No version number. Single line.
+          - .release-work/summary.txt — a concise paragraph (2-4 sentences)
+            describing what changed, written for engineers.
+          Do not modify any other file.
+          PROMPT
+          npx --yes @anthropic-ai/claude-code@2 -p "$(cat /tmp/notes-prompt.txt)" \
+            --allowedTools "Read,Write" --max-turns 6 --model "${MODEL}"
+          test -s .release-work/title.txt && test -s .release-work/summary.txt \
+            || { echo "::error title=release::Claude did not produce title.txt/summary.txt"; exit 1; }
 
       - name: Generate release notes with Claude (API key)
         if: steps.auth.outputs.mode == 'api-key'
@@ -219,7 +225,7 @@ jobs:
         run: |
           TAG="${{ steps.changelog.outputs.current-tag }}"
           if [ ! -s .release-work/title.txt ] || [ ! -s .release-work/summary.txt ]; then
-            echo "::error title=release::Release notes were not generated. If using CLAUDE_CODE_OAUTH_TOKEN, check the Claude step logs (the action skips when the caller workflow file differs from the default branch); or pass ANTHROPIC_API_KEY instead."
+            echo "::error title=release::Release notes were not generated. If using CLAUDE_CODE_OAUTH_TOKEN, check the Claude CLI step logs; or pass ANTHROPIC_API_KEY instead."
             exit 1
           fi
           TITLE=$(cat .release-work/title.txt)
@@ -319,17 +325,19 @@ jobs:
             : > /tmp/denylist-custom.txt
           fi
 
-      # OAuth path: ONE action invocation covers both passes — the draft in
+      # OAuth path: ONE CLI invocation covers both passes — the draft in
       # the main context, then an independent redaction review in a subagent
       # whose context contains only the app context + draft (never the
-      # commit log). Write-restricted, turn-capped.
+      # commit log). Write-restricted, turn-capped. CLI rather than
+      # claude-code-action because the action rejects push events.
       - name: Generate and sanitize public summary (OAuth)
         if: steps.auth.outputs.mode == 'oauth'
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ github.token }}
-          prompt: |
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/whats-new-prompt.txt <<'PROMPT'
             You write end-user-facing release notes ("What's New") for an
             application. The audience is the app's end users, who know nothing
             about the codebase.
@@ -369,11 +377,10 @@ jobs:
             3. Write the sanitized JSON — the bare object, nothing else — to
                .whats-new-work/whats-new-body.json.
 
-            Do not post comments and do not modify any other file.
-          claude_args: |
-            --allowedTools "Read,Write,Task"
-            --max-turns 8
-            --model ${{ inputs.model }}
+            Do not modify any other file.
+          PROMPT
+          npx --yes @anthropic-ai/claude-code@2 -p "$(cat /tmp/whats-new-prompt.txt)" \
+            --allowedTools "Read,Write,Task" --max-turns 8 --model "${MODEL}"
 
       - name: Generate and sanitize public summary (API key)
         if: steps.auth.outputs.mode == 'api-key'
@@ -460,7 +467,7 @@ jobs:
           BODY_FILE=".whats-new-work/whats-new-body.json"
 
           if [ ! -s "$BODY_FILE" ]; then
-            echo "::error title=whats-new::No summary was generated. If using CLAUDE_CODE_OAUTH_TOKEN, check the Claude step logs (the action skips when the caller workflow file differs from the default branch); or pass ANTHROPIC_API_KEY instead."
+            echo "::error title=whats-new::No summary was generated. If using CLAUDE_CODE_OAUTH_TOKEN, check the Claude CLI step logs; or pass ANTHROPIC_API_KEY instead."
             exit 1
           fi
           jq -e '.title and .summary and (.highlights | type == "array")' "$BODY_FILE" > /dev/null             || { echo "::error title=whats-new::Generated summary is not valid JSON with title/summary/highlights"; cat "$BODY_FILE" >&2; exit 1; }
