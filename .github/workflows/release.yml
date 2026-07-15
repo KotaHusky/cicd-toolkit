@@ -267,12 +267,14 @@ jobs:
           # The commit-level changelog stays in changelog.txt (feeding the
           # AI notes and the artifact) but is not duplicated in the body —
           # the generated What's Changed covers it at PR granularity.
-          # Fallback: if generated notes are empty (fetch failed, or no
-          # merged PRs in range — direct-push repos), use the sanitized
-          # commit-level changelog so the body always itemizes changes.
-          if [ -z "$(printf '%s' "$SAFE_NOTES" | tr -d '[:space:]')" ]; then
-            echo "::notice title=release::Generated notes were empty — falling back to the commit-level changelog."
-            SAFE_NOTES=$(printf '## Changelog\n\n%s' "$(cat /tmp/changelog.txt)")
+          # Fallback: generated notes itemize only merged PRs, and still
+          # return a Full Changelog compare link when the range has zero
+          # PRs (direct-push repos) — so trigger on "no itemized lines",
+          # not on emptiness, and keep whatever GitHub did return (the
+          # compare link) after the commit-level changelog.
+          if ! printf '%s\n' "$SAFE_NOTES" | grep -qE '^\* '; then
+            echo "::notice title=release::Generated notes contain no PR entries — including the commit-level changelog."
+            SAFE_NOTES=$(printf '## Changelog\n\n%s\n\n%s' "$(cat /tmp/changelog.txt)" "$SAFE_NOTES")
           fi
           RELEASE_BODY=$(printf '%s\n\n%s' "$SUMMARY" "$SAFE_NOTES")
 
