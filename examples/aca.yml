@@ -41,7 +41,9 @@ jobs:
     with:
       resource-group: my-app-rg
       container-app-name: my-app
-      image: ghcr.io/${{ github.repository }}:latest
+      # GHCR references must be lowercase — hardcode the lowercased path
+      # (github.repository preserves casing, e.g. My-Org/My-App would fail).
+      image: ghcr.io/my-org/my-app:latest
       target-port: 3000
       # ingress: external
       # container-app-environment: my-app-env   # auto-created if missing
