@@ -2,12 +2,14 @@ import * as cdk from 'aws-cdk-lib';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import {
   EcsExpressObservability,
   ObservabilityProps,
   resolveObservability,
 } from '../constructs/ecs-express-observability';
+import { SHARED_EDGE_SSM_KEYS } from './shared-edge-stack';
 
 export interface EcsExpressEdgeStackProps extends cdk.StackProps {
   /**
@@ -56,6 +58,27 @@ export interface EcsExpressEdgeStackProps extends cdk.StackProps {
   ecsClusterName?: string;
   /** ECS service name for compute widgets + alarms. */
   ecsServiceName?: string;
+
+  // --- Shared account-level edge primitives (opt-in) -----------------------
+  /**
+   * When set, the stack resolves the shared CloudFront cache policy and
+   * response-headers policy from SSM rather than creating per-stack resources.
+   * This sidesteps the AWS per-account quota of ~20 cache policies and
+   * ~20 response-headers policies. Deploy {@link SharedEdgeStack} once per
+   * account and pass this prop to every app stack that runs in that account.
+   *
+   * The `ssmPrefix` must match the `ssmPrefix` used when deploying
+   * `SharedEdgeStack` (default: `'/cicd-toolkit/edge'`).
+   *
+   * Omit this prop entirely to retain the original per-stack behavior.
+   */
+  sharedEdge?: {
+    /**
+     * SSM prefix where `SharedEdgeStack` published its primitives.
+     * @default '/cicd-toolkit/edge'
+     */
+    ssmPrefix?: string;
+  };
 }
 
 /**
@@ -119,26 +142,56 @@ export class EcsExpressEdgeStack extends cdk.Stack {
     // Redirect any non-primary alias (e.g. www.example.com) to the primary domain
     // with a 301 — at the edge, before the origin (so it works even though the
     // origin request policy strips Host).
+    //
+    // In shared mode we import the WwwAliasRedirect function published by
+    // SharedEdgeStack via SSM. That function reads the apex domain from the
+    // `x-apex-domain` custom origin header so a single function instance can
+    // serve multiple distributions. In standalone mode we create a per-stack
+    // function with the apex hardcoded (original behavior).
     let fnAssoc: cloudfront.FunctionAssociation[] | undefined;
     if (props.domainName && (props.additionalAliases?.length ?? 0) > 0) {
-      const apex = JSON.stringify(props.domainName);
-      const aliasRedirect = new cloudfront.Function(this, 'AliasRedirect', {
-        runtime: cloudfront.FunctionRuntime.JS_2_0,
-        comment: `Redirect non-${props.domainName} hosts to the apex (301)`,
-        code: cloudfront.FunctionCode.fromInline(
-          `function handler(event){var r=event.request;var h=r.headers.host;` +
-            `if(h&&h.value!==${apex}){var qs=r.querystring;var q='';` +
-            `for(var k in qs){q+=(q?'&':'?')+k+(qs[k].value?('='+qs[k].value):'');}` +
-            `return{statusCode:301,statusDescription:'Moved Permanently',` +
-            `headers:{location:{value:'https://'+${apex}+r.uri+q}}};}return r;}`,
-        ),
-      });
-      fnAssoc = [{ function: aliasRedirect, eventType: cloudfront.FunctionEventType.VIEWER_REQUEST }];
+      const prefix = props.sharedEdge?.ssmPrefix ?? '/cicd-toolkit/edge';
+      let redirectFn: cloudfront.IFunction;
+      if (props.sharedEdge) {
+        redirectFn = cloudfront.Function.fromFunctionAttributes(this, 'AliasRedirect', {
+          functionArn: ssm.StringParameter.valueForStringParameter(
+            this,
+            `${prefix}/${SHARED_EDGE_SSM_KEYS.wwwRedirectFunctionArn}`,
+          ),
+          functionName: ssm.StringParameter.valueForStringParameter(
+            this,
+            `${prefix}/${SHARED_EDGE_SSM_KEYS.wwwRedirectFunctionName}`,
+          ),
+          functionRuntime: cloudfront.FunctionRuntime.JS_2_0.value,
+        });
+      } else {
+        const apex = JSON.stringify(props.domainName);
+        redirectFn = new cloudfront.Function(this, 'AliasRedirect', {
+          runtime: cloudfront.FunctionRuntime.JS_2_0,
+          comment: `Redirect non-${props.domainName} hosts to the apex (301)`,
+          code: cloudfront.FunctionCode.fromInline(
+            `function handler(event){var r=event.request;var h=r.headers.host;` +
+              `if(h&&h.value!==${apex}){var qs=r.querystring;var q='';` +
+              `for(var k in qs){q+=(q?'&':'?')+k+(qs[k].value?('='+qs[k].value):'');}` +
+              `return{statusCode:301,statusDescription:'Moved Permanently',` +
+              `headers:{location:{value:'https://'+${apex}+r.uri+q}}};}return r;}`,
+          ),
+        });
+      }
+      fnAssoc = [{ function: redirectFn, eventType: cloudfront.FunctionEventType.VIEWER_REQUEST }];
     }
+
+    // In shared mode the origin injects x-apex-domain so the shared
+    // WwwAliasRedirect function knows which apex to redirect non-primary hosts to.
+    const originCustomHeaders =
+      props.sharedEdge && props.domainName && (props.additionalAliases?.length ?? 0) > 0
+        ? { 'x-apex-domain': props.domainName }
+        : undefined;
 
     const origin = new origins.HttpOrigin(props.albDnsName, {
       protocolPolicy: props.originProtocolPolicy ?? cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
       httpsPort: 443,
+      customHeaders: originCustomHeaders,
     });
 
     // SSR responses are dynamic: don't cache, forward everything (minus Host so
@@ -147,20 +200,32 @@ export class EcsExpressEdgeStack extends cdk.Stack {
     // visible. The SSR origin (Next.js) emits a long `stale-while-revalidate`,
     // which makes browsers serve the previous page while refreshing in the
     // background; override the header at the edge so clients always revalidate.
-    const ssrCacheControl = new cloudfront.ResponseHeadersPolicy(this, 'SsrCacheControl', {
-      customHeadersBehavior: {
-        customHeaders: [
-          { header: 'cache-control', value: 'no-cache, must-revalidate', override: true },
-        ],
-      },
-    });
+    //
+    // In shared mode, resolve the response-headers policy from SSM rather than
+    // creating a new per-stack AWS::CloudFront::ResponseHeadersPolicy resource.
+    const ssrResponseHeadersPolicy: cloudfront.IResponseHeadersPolicy = props.sharedEdge
+      ? cloudfront.ResponseHeadersPolicy.fromResponseHeadersPolicyId(
+          this,
+          'SsrCacheControl',
+          ssm.StringParameter.valueForStringParameter(
+            this,
+            `${props.sharedEdge.ssmPrefix ?? '/cicd-toolkit/edge'}/${SHARED_EDGE_SSM_KEYS.ssrResponseHeadersPolicyId}`,
+          ),
+        )
+      : new cloudfront.ResponseHeadersPolicy(this, 'SsrCacheControl', {
+          customHeadersBehavior: {
+            customHeaders: [
+              { header: 'cache-control', value: 'no-cache, must-revalidate', override: true },
+            ],
+          },
+        });
 
     const ssrBehavior: cloudfront.BehaviorOptions = {
       origin,
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
       cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-      responseHeadersPolicy: ssrCacheControl,
+      responseHeadersPolicy: ssrResponseHeadersPolicy,
       originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
       functionAssociations: fnAssoc,
       compress: true,
@@ -179,17 +244,29 @@ export class EcsExpressEdgeStack extends cdk.Stack {
     // Next.js image optimizer: /_next/image?url=...&w=...&q=... — the query
     // string carries the params, so it must be forwarded AND keyed in the cache
     // (CACHING_OPTIMIZED drops query strings, which makes the optimizer 400).
-    const imageCachePolicy = new cloudfront.CachePolicy(this, 'NextImageCache', {
-      comment: 'Next.js image optimizer (url/w/q + Accept)',
-      queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
-      headerBehavior: cloudfront.CacheHeaderBehavior.allowList('Accept'),
-      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
-      enableAcceptEncodingGzip: true,
-      enableAcceptEncodingBrotli: true,
-      defaultTtl: cdk.Duration.days(7),
-      minTtl: cdk.Duration.seconds(0),
-      maxTtl: cdk.Duration.days(365),
-    });
+    //
+    // In shared mode, resolve the cache policy from SSM rather than creating a
+    // new per-stack AWS::CloudFront::CachePolicy resource.
+    const imageCachePolicy: cloudfront.ICachePolicy = props.sharedEdge
+      ? cloudfront.CachePolicy.fromCachePolicyId(
+          this,
+          'NextImageCache',
+          ssm.StringParameter.valueForStringParameter(
+            this,
+            `${props.sharedEdge.ssmPrefix ?? '/cicd-toolkit/edge'}/${SHARED_EDGE_SSM_KEYS.nextImageCachePolicyId}`,
+          ),
+        )
+      : new cloudfront.CachePolicy(this, 'NextImageCache', {
+          comment: 'Next.js image optimizer (url/w/q + Accept)',
+          queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
+          headerBehavior: cloudfront.CacheHeaderBehavior.allowList('Accept'),
+          cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+          enableAcceptEncodingGzip: true,
+          enableAcceptEncodingBrotli: true,
+          defaultTtl: cdk.Duration.days(7),
+          minTtl: cdk.Duration.seconds(0),
+          maxTtl: cdk.Duration.days(365),
+        });
     const imageBehavior: cloudfront.BehaviorOptions = {
       origin,
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
