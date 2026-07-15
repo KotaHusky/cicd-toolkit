@@ -36,7 +36,7 @@ on:
         type: string
         default: 'npm run build'
       build-output-dir:
-        description: 'Directory of build output to upload (relative to repo root)'
+        description: 'Directory of build output to upload (relative to working-directory)'
         required: false
         type: string
         default: 'out'
@@ -133,6 +133,12 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
+      # corepack must run before setup-node: its pnpm cache resolution
+      # shells out to `pnpm store path`, which needs the corepack shim.
+      - name: Enable corepack (pnpm)
+        if: github.event.action != 'closed' && inputs.package-manager == 'pnpm'
+        shell: bash
+        run: corepack enable
       - uses: actions/setup-node@v7
         if: github.event.action != 'closed'
         with:

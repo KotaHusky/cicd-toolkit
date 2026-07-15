@@ -131,6 +131,12 @@ jobs:
         with:
           ref: ${{ inputs.checkout-ref || github.ref }}
 
+      # corepack must run before setup-node: its pnpm cache resolution
+      # shells out to `pnpm store path`, which needs the corepack shim.
+      - name: Enable corepack (pnpm)
+        if: inputs.package-manager == 'pnpm'
+        shell: bash
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
