@@ -68,6 +68,7 @@ to integrate all of it themselves.
   - [`StaticSiteStack` (S3 + CloudFront, optional ACM + Route 53)](#staticsitestack-s3--cloudfront-optional-acm--route-53)
   - [`applyTags(scope, tags)`](#applytagsscope-tags)
   - [`StaticSiteDashboard`](#staticsitedashboard)
+  - [SharedEdgeStack (account-level CloudFront primitives)](#sharededgestack-account-level-cloudfront-primitives)
   - [`EcsExpressEdgeStack` (CloudFront in front of ECS Express)](#ecsexpressedgestack-cloudfront-in-front-of-ecs-express)
   - [`OidcBootstrapStack` (GitHub → AWS OIDC provider + deploy roles)](#oidcbootstrapstack-github--aws-oidc-provider--deploy-roles)
   - [`EcsExpressDashboard` / `ecs-express-observability`](#ecsexpressdashboard--ecs-express-observability)
@@ -740,6 +741,24 @@ new StaticSiteDashboard(stack, 'SiteMetrics', {
   dashboardName: 'kiosk-static-site',
 });
 ```
+
+### `SharedEdgeStack` (account-level CloudFront primitives)
+
+CloudFront cache policies, response-headers policies, and functions are account-scoped and capped (~20 each by default) — per-app stacks hit the wall around 10 apps. `SharedEdgeStack` creates `EcsExpressEdgeStack`'s three primitives (Next-image cache policy, SSR response-headers policy, www→apex redirect function) **once per account** and publishes their IDs to SSM under `ssmPrefix` (default `/cicd-toolkit/edge`); app stacks opt in with `sharedEdge` and create zero of their own:
+
+```ts
+// once per account (e.g. in your bootstrap app)
+new SharedEdgeStack(app, 'SharedEdge', { env });
+
+// each app stack
+new EcsExpressEdgeStack(app, 'MyAppEdge', {
+  env,
+  // ...existing props...
+  sharedEdge: {},            // or { ssmPrefix: '/custom/prefix' }
+});
+```
+
+Result: 1 of each primitive account-wide instead of one per stack — scales to ~200 apps. Omitting `sharedEdge` keeps the original per-stack behavior, fully backward compatible.
 
 ### `EcsExpressEdgeStack` (CloudFront in front of ECS Express)
 
