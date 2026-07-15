@@ -235,6 +235,7 @@ jobs:
 | `working-directory` | string | `.` | Repo subdirectory to run the build from |
 | `invalidation-paths` | string | `/*` | Newline- or space-separated paths to invalidate |
 | `sync-delete` | boolean | `true` | Pass `--delete` to `aws s3 sync` |
+| `sync-exclude` | string | `previews/*` | Glob excluded from the sync (both directions) — reserves the preview prefix so prod deploys never delete live PR previews; `''` disables (and forfeits shared-bucket previews). A warning fires if the build output contains the excluded path |
 | `cache-control-immutable` | string | `_next/static/*` | Glob to upload with long-cache headers (empty disables) |
 | `build-args` | string | | `KEY=VALUE` pairs (one per line) exported before the build |
 | `checkout-ref` | string | | Git ref to check out (defaults to triggering ref) |

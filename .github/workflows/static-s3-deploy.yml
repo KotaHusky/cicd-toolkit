@@ -51,6 +51,16 @@ on:
         required: false
         type: boolean
         default: true
+      sync-exclude:
+        description: >-
+          Glob excluded from the sync in both directions. Defaults to
+          'previews/*' — the prefix reserved by preview-s3-deploy.yml — so
+          production deploys never delete live PR previews. Set to '' if your
+          site legitimately ships a previews/ path (which also means you
+          can't host PR previews on this bucket).
+        required: false
+        type: string
+        default: 'previews/*'
       cache-control-immutable:
         description: 'Glob (relative to build-output-dir) whose objects get long-cache headers. Empty disables.'
         required: false
@@ -212,6 +222,8 @@ jobs:
       - name: Sync build output to S3
         id: sync
         shell: bash
+        env:
+          SYNC_EXCLUDE: ${{ inputs.sync-exclude }}
         run: |
           DELETE_FLAG=""
           if [ "${{ inputs.sync-delete }}" = "true" ]; then
@@ -219,12 +231,20 @@ jobs:
           fi
 
           # Default short cache for everything (HTML, etc.)
-          # previews/ is excluded so a production deploy with --delete never
-          # wipes live PR previews (preview-s3-deploy.yml shares the bucket
-          # under that reserved prefix); harmless when previews aren't used.
+          # sync-exclude (default previews/*) keeps production deploys from
+          # deleting live PR previews; the exclusion filters BOTH directions,
+          # so warn loudly if the build output itself contains the prefix.
+          EXCLUDE_ARGS=()
+          if [ -n "${SYNC_EXCLUDE}" ]; then
+            EXCLUDE_ARGS=(--exclude "${SYNC_EXCLUDE}")
+            LOCAL_DIR="${SYNC_EXCLUDE%%/*}"
+            if [ -e "${{ inputs.build-output-dir }}/${LOCAL_DIR}" ]; then
+              echo "::warning title=sync-exclude::Build output contains '${LOCAL_DIR}/', which matches sync-exclude ('${SYNC_EXCLUDE}') and will NOT be uploaded. Set sync-exclude: '' if this path is part of your site (that bucket then can't host PR previews)."
+            fi
+          fi
           aws s3 sync "${{ inputs.build-output-dir }}/" "s3://${{ inputs.bucket-name }}/" \
             $DELETE_FLAG \
-            --exclude "previews/*" \
+            "${EXCLUDE_ARGS[@]}" \
             --cache-control "public, max-age=60, must-revalidate" \
             | tee /tmp/sync.log
 
