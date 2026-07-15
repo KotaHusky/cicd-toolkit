@@ -41,19 +41,13 @@ describe('SharedEdgeStack', () => {
     });
   });
 
-  test('creates exactly one CloudFront Function (WwwAliasRedirect)', () => {
+  test('creates NO CloudFront Function (redirect stays per-stack)', () => {
     const template = Template.fromStack(makeSharedEdge());
-    template.resourceCountIs('AWS::CloudFront::Function', 1);
-    const fn = Object.values(template.findResources('AWS::CloudFront::Function'))[0] as {
-      Properties: { FunctionCode: string; FunctionConfig: { Runtime: string } };
-    };
-    expect(fn.Properties.FunctionCode).toContain('x-apex-domain');
-    expect(fn.Properties.FunctionConfig.Runtime).toBe('cloudfront-js-2.0');
+    template.resourceCountIs('AWS::CloudFront::Function', 0);
   });
 
-  test('publishes four SSM parameters under the default prefix', () => {
+  test('publishes exactly two SSM parameters under the default prefix', () => {
     const template = Template.fromStack(makeSharedEdge());
-    // Verify all four SSM parameter names land under the default prefix
     const prefix = '/cicd-toolkit/edge';
     for (const key of Object.values(SHARED_EDGE_SSM_KEYS)) {
       template.hasResourceProperties('AWS::SSM::Parameter', {
@@ -61,8 +55,7 @@ describe('SharedEdgeStack', () => {
         Type: 'String',
       });
     }
-    // Exactly four SSM parameters — no extra ones
-    template.resourceCountIs('AWS::SSM::Parameter', 4);
+    template.resourceCountIs('AWS::SSM::Parameter', 2);
   });
 
   test('honours a custom ssmPrefix', () => {
@@ -72,13 +65,14 @@ describe('SharedEdgeStack', () => {
     });
   });
 
-  test('emits CfnOutputs for all four shared values', () => {
+  test('emits CfnOutputs for the two shared policy values plus prefix', () => {
     const template = Template.fromStack(makeSharedEdge());
     const keys = Object.keys(template.findOutputs('*'));
     expect(keys.some((k) => k.includes('NextImageCachePolicyId'))).toBe(true);
     expect(keys.some((k) => k.includes('SsrResponseHeadersPolicyId'))).toBe(true);
-    expect(keys.some((k) => k.includes('WwwRedirectFunctionArn'))).toBe(true);
-    expect(keys.some((k) => k.includes('WwwRedirectFunctionName'))).toBe(true);
+    expect(keys.some((k) => k.includes('SsmPrefix'))).toBe(true);
+    // Confirm no function-related outputs
+    expect(keys.some((k) => k.toLowerCase().includes('function'))).toBe(false);
   });
 
   test('creates NO CloudFront Distribution', () => {
@@ -122,9 +116,6 @@ describe('EcsExpressEdgeStack with sharedEdge', () => {
 
   test('resolves image cache policy via SSM token (deploy-time resolve, no CachePolicy resource)', () => {
     const template = Template.fromStack(makeSharedStack());
-    // The /_next/image* behavior must reference a CachePolicyId that is an SSM
-    // dynamic reference (rendered as a CloudFormation dynamic reference or
-    // Fn::GetParam — either way it is NOT a literal UUID string at synth time).
     const dist = Object.values(
       template.findResources('AWS::CloudFront::Distribution'),
     )[0] as {
@@ -153,7 +144,6 @@ describe('EcsExpressEdgeStack with sharedEdge', () => {
         };
       };
     };
-    // ResponseHeadersPolicyId on the default (SSR) behavior must be a token
     const id = dist.Properties.DistributionConfig.DefaultCacheBehavior.ResponseHeadersPolicyId;
     expect(id).toBeDefined();
     expect(typeof id).not.toBe('string');
@@ -177,42 +167,33 @@ describe('EcsExpressEdgeStack with sharedEdge', () => {
     });
   });
 
-  test('with additionalAliases: imports shared function (no new Function resource)', () => {
+  test('with additionalAliases: creates ONE per-stack redirect Function with hardcoded apex', () => {
     const template = Template.fromStack(
       makeSharedStack({ additionalAliases: ['www.example.com'] }),
     );
-    // The shared function is imported via fromFunctionAttributes — no new resource
-    template.resourceCountIs('AWS::CloudFront::Function', 0);
-    // But the distribution must still have a function association on behaviors
-    const dist = Object.values(
-      template.findResources('AWS::CloudFront::Distribution'),
-    )[0] as {
-      Properties: {
-        DistributionConfig: {
-          DefaultCacheBehavior: {
-            FunctionAssociations?: Array<{ EventType: string; FunctionARN: unknown }>;
-          };
-        };
-      };
+    // Function is per-stack even in shared mode (functions are not account-quota-constrained)
+    template.resourceCountIs('AWS::CloudFront::Function', 1);
+    const fn = Object.values(template.findResources('AWS::CloudFront::Function'))[0] as {
+      Properties: { FunctionCode: string };
     };
-    const assocs =
-      dist.Properties.DistributionConfig.DefaultCacheBehavior.FunctionAssociations ?? [];
-    expect(assocs.length).toBeGreaterThan(0);
-    const viewerReqAssoc = assocs.find((a) => a.EventType === 'viewer-request');
-    expect(viewerReqAssoc).toBeDefined();
+    // Apex is hardcoded inline, not read from a header
+    expect(fn.Properties.FunctionCode).toContain('301');
+    expect(fn.Properties.FunctionCode).toContain('"example.com"');
+    // Policies still ZERO — those are what shared mode saves
+    template.resourceCountIs('AWS::CloudFront::CachePolicy', 0);
+    template.resourceCountIs('AWS::CloudFront::ResponseHeadersPolicy', 0);
   });
 
-  test('with additionalAliases in shared mode: origin gets x-apex-domain custom header', () => {
+  test('with additionalAliases in shared mode: origin does NOT set x-apex-domain', () => {
     const template = Template.fromStack(
       makeSharedStack({ additionalAliases: ['www.example.com'] }),
     );
+    // No custom origin headers — the per-stack function hardcodes the apex directly
     template.hasResourceProperties('AWS::CloudFront::Distribution', {
       DistributionConfig: Match.objectLike({
         Origins: Match.arrayWith([
           Match.objectLike({
-            OriginCustomHeaders: Match.arrayWith([
-              Match.objectLike({ HeaderName: 'x-apex-domain', HeaderValue: 'example.com' }),
-            ]),
+            OriginCustomHeaders: Match.absent(),
           }),
         ]),
       }),
@@ -229,7 +210,6 @@ describe('EcsExpressEdgeStack with sharedEdge', () => {
         sharedEdge: { ssmPrefix: '/my-org/shared-edge' },
       }),
     );
-    // Verify no CachePolicy or ResponseHeadersPolicy resource was created
     template.resourceCountIs('AWS::CloudFront::CachePolicy', 0);
     template.resourceCountIs('AWS::CloudFront::ResponseHeadersPolicy', 0);
   });
@@ -268,7 +248,6 @@ describe('EcsExpressEdgeStack without sharedEdge (backward compat)', () => {
     const fn = Object.values(template.findResources('AWS::CloudFront::Function'))[0] as {
       Properties: { FunctionCode: string };
     };
-    // Original function hardcodes the apex, not the x-apex-domain header approach
     expect(fn.Properties.FunctionCode).toContain('301');
     expect(fn.Properties.FunctionCode).toContain('"example.com"');
   });

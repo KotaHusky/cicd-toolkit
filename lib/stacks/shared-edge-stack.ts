@@ -7,13 +7,11 @@ import { Construct } from 'constructs';
 export const SHARED_EDGE_SSM_KEYS = {
   nextImageCachePolicyId: 'next-image-cache-policy-id',
   ssrResponseHeadersPolicyId: 'ssr-response-headers-policy-id',
-  wwwRedirectFunctionArn: 'www-redirect-function-arn',
-  wwwRedirectFunctionName: 'www-redirect-function-name',
 } as const;
 
 export interface SharedEdgeStackProps extends cdk.StackProps {
   /**
-   * SSM prefix under which the four shared-primitive parameter names are
+   * SSM prefix under which the two shared-primitive parameter names are
    * published. Must start with `/` and must not end with `/`.
    * @default '/cicd-toolkit/edge'
    */
@@ -28,13 +26,18 @@ export interface SharedEdgeStackProps extends cdk.StackProps {
  * hits the wall. Deploy this stack **once per account/region** and point every
  * `EcsExpressEdgeStack` at it via the `sharedEdge` prop to stay well within quota.
  *
- * Primitives created:
+ * Primitives created (two):
  * - **NextImageCache** — CachePolicy keyed on url/w/q query strings + Accept header
  * - **SsrCacheControl** — ResponseHeadersPolicy that forces `no-cache, must-revalidate`
- * - **WwwAliasRedirect** — CloudFront Function (JS_2_0) for www→apex 301 redirects
  *
- * All three IDs/ARNs are published to SSM Parameter Store under `ssmPrefix` so
- * consumer stacks can resolve them at deploy time without a cross-stack dependency.
+ * Both IDs are published to SSM Parameter Store under `ssmPrefix` so consumer
+ * stacks can resolve them at deploy time without a cross-stack dependency.
+ *
+ * The www→apex redirect CloudFront Function is intentionally NOT shared here.
+ * CloudFront Functions have a ~100/account quota (vs ~20 for policies), so
+ * each `EcsExpressEdgeStack` that needs a redirect creates its own per-stack
+ * function with the apex domain hardcoded — that is correct and not a quota risk
+ * even at 50 alias-using apps.
  *
  * ### Bootstrap once per account (us-east-1 required for CloudFront)
  * ```ts
@@ -51,9 +54,8 @@ export interface SharedEdgeStackProps extends cdk.StackProps {
  * });
  * ```
  *
- * IMPORTANT: this stack must be deployed in us-east-1 — CloudFront functions and
- * associated policies are global resources but CloudFormation only accepts them
- * from the us-east-1 control plane.
+ * IMPORTANT: this stack must be deployed in us-east-1 — CloudFront policies are
+ * global resources but CloudFormation only accepts them from the us-east-1 control plane.
  */
 export class SharedEdgeStack extends cdk.Stack {
   /** Resolved SSM prefix (without trailing slash). */
@@ -63,17 +65,11 @@ export class SharedEdgeStack extends cdk.Stack {
   public readonly nextImageCachePolicy: cloudfront.CachePolicy;
   /** The shared response-headers policy that forces SSR responses to revalidate. */
   public readonly ssrResponseHeadersPolicy: cloudfront.ResponseHeadersPolicy;
-  /** The shared CloudFront Function used for www→apex 301 redirects. */
-  public readonly wwwRedirectFunction: cloudfront.Function;
 
   /** SSM parameter that holds {@link nextImageCachePolicy}.cachePolicyId. */
   public readonly nextImageCachePolicyIdParam: ssm.StringParameter;
   /** SSM parameter that holds {@link ssrResponseHeadersPolicy}.responseHeadersPolicyId. */
   public readonly ssrResponseHeadersPolicyIdParam: ssm.StringParameter;
-  /** SSM parameter that holds the www-redirect function ARN. */
-  public readonly wwwRedirectFunctionArnParam: ssm.StringParameter;
-  /** SSM parameter that holds the www-redirect function name (needed for fromFunctionAttributes). */
-  public readonly wwwRedirectFunctionNameParam: ssm.StringParameter;
 
   constructor(scope: Construct, id: string, props?: SharedEdgeStackProps) {
     super(scope, id, props);
@@ -109,28 +105,7 @@ export class SharedEdgeStack extends cdk.Stack {
       },
     });
 
-    // Redirect any non-primary alias (e.g. www.example.com) to the primary domain
-    // with a 301 — at the edge, before the origin. The redirect target is injected
-    // per-request via the `x-apex-domain` header forwarded by each distribution.
-    // Consumer stacks that don't use additionalAliases will never attach this
-    // function; it's shared only when a www→apex redirect is needed.
-    this.wwwRedirectFunction = new cloudfront.Function(this, 'WwwAliasRedirect', {
-      runtime: cloudfront.FunctionRuntime.JS_2_0,
-      comment: 'Shared www→apex 301 redirect (apex injected via x-apex-domain header)',
-      code: cloudfront.FunctionCode.fromInline(
-        // The apex is read from the x-apex-domain custom header set by the
-        // distribution's origin-request policy, so a single function instance
-        // can serve multiple distributions with different apex domains.
-        `function handler(event){var r=event.request;var h=r.headers.host;` +
-          `var a=r.headers['x-apex-domain'];` +
-          `if(h&&a&&h.value!==a.value){var qs=r.querystring;var q='';` +
-          `for(var k in qs){q+=(q?'&':'?')+k+(qs[k].value?('='+qs[k].value):'');}` +
-          `return{statusCode:301,statusDescription:'Moved Permanently',` +
-          `headers:{location:{value:'https://'+a.value+r.uri+q}}};}return r;}`,
-      ),
-    });
-
-    // Publish all IDs/ARNs to SSM so consumer stacks resolve at deploy time
+    // Publish IDs to SSM so consumer stacks resolve at deploy time
     // without hard CloudFormation cross-stack dependencies.
     this.nextImageCachePolicyIdParam = new ssm.StringParameter(
       this,
@@ -153,27 +128,6 @@ export class SharedEdgeStack extends cdk.Stack {
       },
     );
 
-    this.wwwRedirectFunctionArnParam = new ssm.StringParameter(
-      this,
-      'WwwRedirectFunctionArnParam',
-      {
-        parameterName: `${this.ssmPrefix}/${SHARED_EDGE_SSM_KEYS.wwwRedirectFunctionArn}`,
-        stringValue: this.wwwRedirectFunction.functionArn,
-        description: 'Shared WwwAliasRedirect CloudFront Function ARN (cicd-toolkit SharedEdgeStack)',
-      },
-    );
-
-    this.wwwRedirectFunctionNameParam = new ssm.StringParameter(
-      this,
-      'WwwRedirectFunctionNameParam',
-      {
-        parameterName: `${this.ssmPrefix}/${SHARED_EDGE_SSM_KEYS.wwwRedirectFunctionName}`,
-        stringValue: this.wwwRedirectFunction.functionName,
-        description:
-          'Shared WwwAliasRedirect CloudFront Function name (cicd-toolkit SharedEdgeStack)',
-      },
-    );
-
     // CfnOutputs for discoverability post-deploy
     new cdk.CfnOutput(this, 'NextImageCachePolicyId', {
       value: this.nextImageCachePolicy.cachePolicyId,
@@ -182,14 +136,6 @@ export class SharedEdgeStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'SsrResponseHeadersPolicyId', {
       value: this.ssrResponseHeadersPolicy.responseHeadersPolicyId,
       description: 'Shared SsrCacheControl response-headers-policy ID',
-    });
-    new cdk.CfnOutput(this, 'WwwRedirectFunctionArn', {
-      value: this.wwwRedirectFunction.functionArn,
-      description: 'Shared WwwAliasRedirect CloudFront Function ARN',
-    });
-    new cdk.CfnOutput(this, 'WwwRedirectFunctionName', {
-      value: this.wwwRedirectFunction.functionName,
-      description: 'Shared WwwAliasRedirect CloudFront Function name',
     });
     new cdk.CfnOutput(this, 'SsmPrefix', {
       value: this.ssmPrefix,
