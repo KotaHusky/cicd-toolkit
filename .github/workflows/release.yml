@@ -121,11 +121,11 @@ jobs:
             echo "Previous tag: ${PREVIOUS_TAG}"
             # Use GitHub API to compare tags (avoids needing full git history)
             COMMITS=$(gh api "repos/${{ github.repository }}/compare/${PREVIOUS_TAG}...${CURRENT_TAG}" \
-              --jq '[.commits[] | select(.parents | length == 1) | "- \(.commit.message | split("\n")[0]) (\(.sha[:7]))"] | join("\n")')
+              --jq '[.commits[] | select(.parents | length == 1) | "- `\(.commit.message | split("\n")[0] | gsub("`"; ""))` (\(.sha[:7]))"] | join("\n")')
           else
             echo "No previous tag found, using all commits up to tag"
             COMMITS=$(gh api "repos/${{ github.repository }}/commits?sha=${CURRENT_TAG}&per_page=100" \
-              --jq '[.[] | select(.parents | length == 1) | "- \(.commit.message | split("\n")[0]) (\(.sha[:7]))"] | join("\n")')
+              --jq '[.[] | select(.parents | length == 1) | "- `\(.commit.message | split("\n")[0] | gsub("`"; ""))` (\(.sha[:7]))"] | join("\n")')
           fi
 
           # Write to file to avoid shell escaping issues
