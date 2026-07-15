@@ -18,6 +18,16 @@ on:
         required: false
         type: string
         default: ''
+      policy-scan:
+        description: 'Run checkov policy-as-code scan against synthesized CloudFormation templates'
+        required: false
+        type: boolean
+        default: true
+      policy-soft-fail:
+        description: 'When true, policy findings annotate the summary but do not fail the job. When false, findings cause a job failure.'
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
   group: cdk-synth-${{ github.workflow }}-${{ github.ref }}
@@ -49,3 +59,78 @@ jobs:
           fi
           # shellcheck disable=SC2086
           npx cdk synth --quiet ${CONTEXT_FLAGS}
+
+      - name: Policy scan (checkov)
+        if: inputs.policy-scan
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+
+          # Guard: skip if cdk.out is absent or contains no CloudFormation templates.
+          if [ ! -d "cdk.out" ] || [ -z "$(find cdk.out -name '*.template.json' -print -quit 2>/dev/null)" ]; then
+            echo "::notice::cdk.out is absent or contains no *.template.json files; policy scan skipped."
+            exit 0
+          fi
+
+          # Install checkov at a pinned version.
+          # NOTE: Dependabot does not update pip install versions in shell steps —
+          # bump this pin manually when upgrading checkov.
+          pip install --quiet --user "checkov==3.3.8"
+
+          # Build soft-fail flag: checkov --soft-fail causes exit 0 regardless of
+          # findings, which is exactly what policy-soft-fail: true needs.
+          # When policy-soft-fail is false we omit the flag so non-zero findings
+          # propagate naturally and fail the step.
+          SOFT_FAIL_FLAG=""
+          if [ "${{ inputs.policy-soft-fail }}" = "true" ]; then
+            SOFT_FAIL_FLAG="--soft-fail"
+          fi
+
+          # Run checkov and capture output; tee to a file for the artifact.
+          SCAN_OUTPUT_FILE="checkov-results.txt"
+          # shellcheck disable=SC2086
+          checkov \
+            --directory cdk.out \
+            --framework cloudformation \
+            --compact \
+            --quiet \
+            ${SOFT_FAIL_FLAG} \
+            | tee "${SCAN_OUTPUT_FILE}" \
+            || true  # error propagation is handled by soft-fail logic below
+
+          # Re-run without capturing to preserve the correct exit code when
+          # soft-fail is disabled — tee always exits 0.
+          if [ "${{ inputs.policy-soft-fail }}" != "true" ]; then
+            # shellcheck disable=SC2086
+            checkov \
+              --directory cdk.out \
+              --framework cloudformation \
+              --compact \
+              --quiet \
+              ${SOFT_FAIL_FLAG}
+          fi
+
+          # Summarize findings into the job summary.
+          FAILED_COUNT=$(grep -c '^- FAILED' "${SCAN_OUTPUT_FILE}" 2>/dev/null || echo 0)
+          PASSED_COUNT=$(grep -c '^- PASSED' "${SCAN_OUTPUT_FILE}" 2>/dev/null || echo 0)
+          {
+            echo "## Policy Scan Results (checkov)"
+            echo ""
+            echo "| Result | Count |"
+            echo "| ------ | ----- |"
+            echo "| Passed | ${PASSED_COUNT} |"
+            echo "| Failed | ${FAILED_COUNT} |"
+            if [ "${FAILED_COUNT}" -gt 0 ] && [ "${{ inputs.policy-soft-fail }}" = "true" ]; then
+              echo ""
+              echo "> **Note:** ${FAILED_COUNT} finding(s) reported. Job continues because \`policy-soft-fail\` is enabled."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload policy scan results
+        if: inputs.policy-scan && !cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: policy-scan-results
+          path: checkov-results.txt
+          if-no-files-found: ignore
