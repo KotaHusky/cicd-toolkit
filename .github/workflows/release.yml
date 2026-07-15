@@ -261,7 +261,7 @@ jobs:
             ${PREV_TAG:+-f previous_tag_name="$PREV_TAG"} \
             --jq .body || true)
           SAFE_NOTES=$(printf '%s\n' "$GEN_NOTES" | tr -d '\140' \
-            | sed -E 's|^\* (.+)( by @[A-Za-z0-9-]+ in .+)$|* `\1`\2|')
+            | sed -E 's|^\* (.+)( by @[A-Za-z0-9-]+(\[bot\])? in .+)$|* `\1`\2|')
 
           # Use printf to avoid YAML indentation leaking into the body.
           # The commit-level changelog stays in changelog.txt (feeding the
