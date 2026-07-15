@@ -3,7 +3,9 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      # Full semver only — the floating v2 / v2.5 tags this workflow pushes
+      # must not trigger another (failing) release run for themselves.
+      - 'v[0-9]*.[0-9]*.[0-9]*'
 
 permissions:
   contents: write
@@ -21,9 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-tags: true
+      # Shallow: HEAD is the tagged commit, which is all the floating tags
+      # need to point at. fetch-tags: true is fatal on tag-push events
+      # (actions/checkout#1467).
+      - uses: actions/checkout@v7
 
       - name: Advance floating tags
         shell: bash

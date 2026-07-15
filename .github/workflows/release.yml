@@ -66,10 +66,12 @@ jobs:
         with:
           egress-policy: audit
 
+      # Shallow on purpose: fetch-tags: true is fatal on tag-push events
+      # (actions/checkout#1467: "Cannot fetch both <sha> and refs/tags/X")
+      # and nothing here needs history — the previous tag comes from
+      # `git ls-remote` and the commit range from the compare API.
       - name: Checkout code
         uses: actions/checkout@v7
-        with:
-          fetch-tags: true
 
       # OAuth preferred (one token across repos, subscription-billed);
       # API key is the curl fallback. The secrets context is not allowed in
@@ -97,8 +99,12 @@ jobs:
           CURRENT_TAG="${{ github.ref_name }}"
           echo "current-tag=${CURRENT_TAG}" >> "$GITHUB_OUTPUT"
 
-          # Find the previous semver tag (skip the current one)
-          PREVIOUS_TAG=$(git tag --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -n 1 || true)
+          # Find the previous semver tag (skip the current one) from the
+          # remote's ref advertisement — a few bytes per tag on any repo
+          # size, so the checkout can stay shallow with no tag fetch.
+          PREVIOUS_TAG=$(git ls-remote --tags origin \
+            | awk '{print $2}' | sed -e 's|^refs/tags/||' -e 's|\^{}$||' \
+            | sort -u -V | grep -vx "${CURRENT_TAG}" | tail -n 1 || true)
 
           if [ -n "$PREVIOUS_TAG" ]; then
             echo "Previous tag: ${PREVIOUS_TAG}"
