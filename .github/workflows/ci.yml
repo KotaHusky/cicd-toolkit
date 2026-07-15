@@ -47,7 +47,10 @@ jobs:
             # Reading from git guarantees we see what was actually committed.
             if compgen -G "$DIR/assets/*.zip" > /dev/null; then
               for Z in "$DIR"/assets/*.zip; do
-                git show "HEAD:$Z" | unzip -p - | shasum -a 256
+                TMP_ZIP=$(mktemp /tmp/asset-XXXXXX.zip)
+                git show "HEAD:$Z" > "$TMP_ZIP"
+                unzip -p "$TMP_ZIP" | shasum -a 256
+                rm -f "$TMP_ZIP"
               done > /tmp/assets-committed.txt
             fi
             (cd "$DIR" && npm ci && npm test)
