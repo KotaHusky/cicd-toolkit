@@ -10,6 +10,73 @@
 
 Reusable GitHub Actions workflows for CI/CD. Call them from any repo with `workflow_call`.
 
+**cicd-toolkit** is an opinionated delivery platform in a repo: wire a few
+caller files into any project and it gets verified builds with AI code review,
+deploys to AWS / Azure / Cloudflare, fully automatic semver releases with
+engineer notes *and* end-user-facing "what's new" feeds, and the operational
+guardrails a small team never gets around to building — approval-gated
+promotion, one-click rollback, policy scanning, build provenance, self-healing
+releases, and an AI doctor that triages red CI. Everything is consumed at
+`@main` (or pinned), so fixes ship to every project on merge. A bundled
+[Claude Code plugin](#claude-code-plugin) teaches AI agents in consumer repos
+to integrate all of it themselves.
+
+## Capabilities
+
+| Capability | Provided by | Notes |
+|---|---|---|
+| CI: build, test, lint (Turborepo-aware) | [`build-verify.yml`](#build-verification) | Node 24, npm/pnpm, shared cache |
+| AI code review on every PR | embedded in [`build-verify.yml`](#build-verification), standalone [`claude-review.yml`](#claude-code-review) | Inline + sticky comments; opt-in [test-gap analysis](#build-verification); enforced finding disposition via the [Review Threads gate](#build-verification) |
+| Conventional-commit enforcement | [`commitlint.yml`](#commitlint) | The contract that powers automatic versioning |
+| Container images | [`docker-ghcr.yml`](#docker-build--push-to-ghcr) | BuildKit provenance; opt-in [attestations](#docker-build--push-to-ghcr) |
+| Deploy: AWS CDK | [`cdk-deploy.yml`](#cdk-deploy) + [`cdk-synth.yml`](#cdk-deploy) PR check | OIDC auth; default-on report-only [checkov policy scan](#cdk-deploy) |
+| Deploy: static sites | [`static-s3-deploy.yml`](#static-site-deploy-s3--cloudfront) | S3 + CloudFront + cache strategy |
+| Deploy: containers on ECS | [`ecs-express-deploy.yml` / `ecs-express-app-deploy.yml`](#ecs-express-deploy) | GHCR→ECR mirror, edge stack, dev/prod |
+| Deploy: Azure Container Apps | [`aca-provision.yml` + `aca-deploy.yml`](#azure-container-apps) | Bicep + Azure OIDC |
+| DNS | [`cloudflare-dns.yml`](#cloudflare-dns) | Record upsert + cache purge |
+| Staged promotion, deployment tracking, rollback | [Environments, Promotion & Rollback](#environments-promotion--rollback) | GitHub Environments gates; DORA raw data; redeploy-a-tag rollback |
+| Automatic releases | [`auto-version.yml`](#automatic-versioning) → [`release.yml`](#ai-powered-release) | Merge to main = release; AI notes; orphan self-heal |
+| End-user release notes in your app | [What's-New summaries](#end-user-whats-new-summaries) + `lib/whats-new` | Curated context, redaction judge, deny-list |
+| Red-CI triage | [`ci-doctor.yml`](#ci-doctor) | AI diagnosis issue, auto-closed on recovery |
+| AWS infra building blocks | [CDK constructs](#cdk-constructs) | Static site, ECS edge, OIDC bootstrap, dashboards |
+| Agent-assisted integration | [Claude Code plugin](#claude-code-plugin) | Skills for wiring workflows, secrets, OIDC |
+
+## Table of Contents
+
+<!-- TOC:BEGIN -->
+- [Workflows](#workflows)
+  - [Build Verification](#build-verification)
+  - [Commitlint](#commitlint)
+  - [Docker Build & Push to GHCR](#docker-build--push-to-ghcr)
+  - [CDK Deploy](#cdk-deploy)
+  - [Static Site Deploy (S3 + CloudFront)](#static-site-deploy-s3--cloudfront)
+  - [ECS Express Deploy](#ecs-express-deploy)
+  - [Azure Container Apps](#azure-container-apps)
+  - [Cloudflare DNS](#cloudflare-dns)
+  - [Environments, Promotion & Rollback](#environments-promotion--rollback)
+  - [AI-Powered Release](#ai-powered-release)
+  - [Automatic Versioning](#automatic-versioning)
+  - [End-User What's-New Summaries](#end-user-whats-new-summaries)
+  - [Claude Code Review](#claude-code-review)
+  - [CI Doctor](#ci-doctor)
+- [Composite actions](#composite-actions)
+- [Setup](#setup)
+  - [Secrets](#secrets)
+  - [Pinning & Versions](#pinning--versions)
+  - [OIDC Bootstrap (CDK Deploy)](#oidc-bootstrap-cdk-deploy)
+- [CDK constructs](#cdk-constructs)
+  - [`StaticSiteStack` (S3 + CloudFront, optional ACM + Route 53)](#staticsitestack-s3--cloudfront-optional-acm--route-53)
+  - [`applyTags(scope, tags)`](#applytagsscope-tags)
+  - [`StaticSiteDashboard`](#staticsitedashboard)
+  - [`EcsExpressEdgeStack` (CloudFront in front of ECS Express)](#ecsexpressedgestack-cloudfront-in-front-of-ecs-express)
+  - [`OidcBootstrapStack` (GitHub → AWS OIDC provider + deploy roles)](#oidcbootstrapstack-github--aws-oidc-provider--deploy-roles)
+  - [`EcsExpressDashboard` / `ecs-express-observability`](#ecsexpressdashboard--ecs-express-observability)
+- [Examples](#examples)
+- [Claude Code plugin](#claude-code-plugin)
+- [Claude PR review](#claude-pr-review)
+- [License](#license)
+<!-- TOC:END -->
+
 ## Workflows
 
 ### Build Verification
@@ -140,7 +207,7 @@ See the workflow file for the full list (`pre-build-filter`, `concurrency`, `run
 
 ### Static Site Deploy (S3 + CloudFront)
 
-**`static-s3-deploy.yml`** — Build a static site (Next.js `output: 'export'`, Astro, SvelteKit, Vite, plain HTML), sync to S3, invalidate CloudFront. Pair with the [`StaticSiteStack`](#staticsitestack-s3--cloudfront--acm--route-53) CDK construct below for one-shot infra.
+**`static-s3-deploy.yml`** — Build a static site (Next.js `output: 'export'`, Astro, SvelteKit, Vite, plain HTML), sync to S3, invalidate CloudFront. Pair with the [`StaticSiteStack`](#staticsitestack-s3--cloudfront-optional-acm--route-53) CDK construct below for one-shot infra.
 
 ```yaml
 jobs:
@@ -561,6 +628,14 @@ jobs:
 
 Secrets: `CLAUDE_CODE_OAUTH_TOKEN` (preferred) or `ANTHROPIC_API_KEY`; with neither, a bare tracking issue with the run link is still filed. See [`examples/ci-doctor.yml`](examples/ci-doctor.yml).
 
+## Composite actions
+
+Step-level building blocks, referenced as `uses: KotaHusky/cicd-toolkit/actions/<name>@main` inside your own jobs (each has a full README):
+
+- [`turbo-setup`](actions/turbo-setup/) — Node + npm cache + Turborepo remote cache in one step
+- [`ecr-mirror`](actions/ecr-mirror/) — mirror a GHCR image (by digest) into ECR for ECS consumption
+- [`cfn-recover`](actions/cfn-recover/) — unstick CloudFormation stacks in ROLLBACK_COMPLETE/FAILED states before a deploy
+
 ## Setup
 
 ### Secrets
@@ -665,6 +740,18 @@ new StaticSiteDashboard(stack, 'SiteMetrics', {
   dashboardName: 'kiosk-static-site',
 });
 ```
+
+### `EcsExpressEdgeStack` (CloudFront in front of ECS Express)
+
+CloudFront distribution over an ECS Express service's ALB: custom-domain ACM cert, alias redirects, Next.js-aware cache behaviors (static assets long-cached, `/_next/image` query-string-aware), and opt-in tiered observability (dashboards + alarms via `observability: { tier: 'prod' | 'dev', alarmEmail }`). Pairs with [`ecs-express-app-deploy.yml`](#ecs-express-deploy), which synthesizes it from the consumer's thin CDK app.
+
+### `OidcBootstrapStack` (GitHub → AWS OIDC provider + deploy roles)
+
+One-time bootstrap: the GitHub OIDC provider plus a scoped deploy role per repo (`RepoRole[]`), each trust-limited to its repo/branch. Every role automatically gets `sts:AssumeRole` on the CDK bootstrap roles and account-scoped `cloudformation:ListStacks`; roles deploying with `cdk deploy --method=direct` opt into the Cloud Control grants via `directDeployResourceOps: true`. See [OIDC Bootstrap](#oidc-bootstrap-cdk-deploy) for the deploy flow and the `bootstrap-oidc` plugin skill for a guided run.
+
+### `EcsExpressDashboard` / `ecs-express-observability`
+
+CloudWatch dashboard (ALB + ECS service metrics) and the tiered alarm set used by `EcsExpressEdgeStack`'s `observability` prop — usable standalone for existing services.
 
 ## Examples
 
