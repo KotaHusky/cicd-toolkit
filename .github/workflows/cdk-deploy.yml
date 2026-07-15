@@ -91,7 +91,7 @@ jobs:
         with:
           ref: ${{ inputs.checkout-ref || github.ref }}
 
-      - uses: KotaHusky/cicd-toolkit/actions/turbo-setup@v2
+      - uses: KotaHusky/cicd-toolkit/actions/turbo-setup@main
         with:
           node-version: ${{ inputs.node-version }}
           pre-build-filter: ${{ inputs.pre-build-filter }}
@@ -103,7 +103,7 @@ jobs:
 
       - name: Recover stuck stacks
         if: inputs.recover-stacks && inputs.stack-prefix != ''
-        uses: KotaHusky/cicd-toolkit/actions/cfn-recover@v2
+        uses: KotaHusky/cicd-toolkit/actions/cfn-recover@main
         with:
           stack-prefix: ${{ inputs.stack-prefix }}
 

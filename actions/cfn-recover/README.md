@@ -18,7 +18,7 @@ Assumes AWS credentials are already configured (e.g. via `aws-actions/configure-
 ## Usage
 
 ```yaml
-- uses: KotaHusky/cicd-toolkit/actions/cfn-recover@v2
+- uses: KotaHusky/cicd-toolkit/actions/cfn-recover@main
   with:
     stack-prefix: MyProject-
 ```

@@ -40,7 +40,7 @@ Assumes AWS credentials are already configured (e.g. via `aws-actions/configure-
   run: echo "${{ github.token }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
 - id: mirror
-  uses: KotaHusky/cicd-toolkit/actions/ecr-mirror@v2
+  uses: KotaHusky/cicd-toolkit/actions/ecr-mirror@main
   with:
     source-image: ghcr.io/my-org/my-app@${{ needs.build.outputs.digest }}
     ecr-repo: my-app
