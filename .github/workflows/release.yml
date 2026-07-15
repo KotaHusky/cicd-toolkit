@@ -230,6 +230,14 @@ jobs:
           fi
           TITLE=$(cat .release-work/title.txt)
           SUMMARY=$(cat .release-work/summary.txt)
+          # The AI summary is composed from the commit log and can echo
+          # @handles or #123 tokens from it — code-span such tokens so they
+          # can't become live mentions/autolinks (same class as the
+          # changelog fix below). Existing backticks are stripped first so
+          # the inserted spans stay valid.
+          SUMMARY=$(printf '%s' "$SUMMARY" | tr -d '\140' \
+            | sed -E -e 's/(^|[^[:alnum:]])@([A-Za-z0-9][A-Za-z0-9-]*)/\1`@\2`/g' \
+                     -e 's/(^|[^[:alnum:]])#([0-9]+)/\1`#\2`/g')
 
           RELEASE_TITLE="${TAG} — ${TITLE}"
 
