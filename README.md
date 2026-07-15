@@ -103,6 +103,9 @@ jobs:
 jobs:
   deploy:
     uses: KotaHusky/cicd-toolkit/.github/workflows/cdk-deploy.yml@main
+    permissions:
+      id-token: write   # OIDC to AWS
+      contents: read
     with:
       aws-region: 'us-east-1'
       cdk-context: 'env=prod projectName=my-app'
@@ -243,6 +246,10 @@ Key inputs (see the workflow file for the full list):
 **`aca-provision.yml`** + **`aca-deploy.yml`** — Provision Container Apps infrastructure from a Bicep template (Day-2 updates; the very first bootstrap runs locally, see [`examples/aca.yml`](examples/aca.yml)), then deploy a container image to the app. Both authenticate via Azure OIDC federated credentials — grant the calling workflow `id-token: write`.
 
 ```yaml
+permissions:
+  id-token: write   # OIDC login to Azure
+  contents: read
+
 jobs:
   provision:
     uses: KotaHusky/cicd-toolkit/.github/workflows/aca-provision.yml@main
