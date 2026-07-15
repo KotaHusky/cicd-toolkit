@@ -106,13 +106,20 @@ jobs:
           LAST=$(gh api --paginate "repos/${REPO}/tags" --jq '.[].name' \
             | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)
 
-          # Self-heal an orphaned tag: if the last tag has no GitHub Release,
-          # a prior release run failed after tagging. Re-release that tag
-          # instead of computing a new bump — otherwise its commits would be
-          # skipped forever (the next compare starts from it). Commits since
-          # the orphan ship in the next releasable merge. Skipped for draft
-          # releases, which the releases/tags endpoint cannot see.
-          if [ -n "$LAST" ] && [ "${{ inputs.draft }}" != "true" ] \
+          # Self-heal an orphaned tag: if the last tag has no GitHub Release
+          # but the repo does release, a prior release run failed after
+          # tagging. Re-release that tag instead of computing a new bump —
+          # otherwise its commits would be skipped forever (the next compare
+          # starts from it). Commits since the orphan ship in the next
+          # releasable merge. Guarded on at least one existing Release so a
+          # repo adopting this workflow with plain unreleased git tags gets
+          # a normal bump, not a surprise release of its old tag. Skipped
+          # for draft releases, which the releases endpoints cannot see.
+          HAS_RELEASES=false
+          if gh api "repos/${REPO}/releases/latest" > /dev/null 2>&1; then
+            HAS_RELEASES=true
+          fi
+          if [ -n "$LAST" ] && [ "$HAS_RELEASES" = "true" ] && [ "${{ inputs.draft }}" != "true" ] \
              && ! gh api "repos/${REPO}/releases/tags/${LAST}" > /dev/null 2>&1; then
             if [ "$DRY_RUN" = "true" ]; then
               echo "bump=retry" >> "$GITHUB_OUTPUT"
@@ -122,7 +129,7 @@ jobs:
             fi
             echo "bump=retry" >> "$GITHUB_OUTPUT"
             echo "tag=${LAST}" >> "$GITHUB_OUTPUT"
-            echo "::warning title=auto-version::${LAST} is tagged but has no GitHub Release (a prior release run failed) — re-releasing it. Commits merged since will ship in the next release."
+            echo "::warning title=auto-version::${LAST} is tagged but has no GitHub Release (most likely a prior release run failed after tagging) — re-releasing it. Commits merged since will ship in the next release."
             exit 0
           fi
 

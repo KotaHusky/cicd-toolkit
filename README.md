@@ -234,7 +234,7 @@ Bump rules (matching semantic-release defaults): `feat!:`/`BREAKING CHANGE` → 
 
 The tag is created with the run's `GITHUB_TOKEN`, whose events don't trigger other workflows — `release.yml` is invoked directly as a nested workflow, so no PAT is needed and a tag-push release workflow can coexist without double-releasing. Manual `v*.*.*` tags keep working as an escape hatch and become the new baseline for the next auto bump.
 
-If a release run fails after tagging (leaving a tag with no GitHub Release), the next run — including a manual full re-run — detects the orphan and re-releases that tag instead of computing a new bump (`bump: retry`); commits merged in the meantime ship in the following release.
+If a release run fails after tagging (leaving a tag with no GitHub Release), the next run — including a manual full re-run — detects the orphan and re-releases that tag instead of computing a new bump (`bump: retry`); commits merged in the meantime ship in the following release. The self-heal only fires in repos that already have at least one GitHub Release — adopting this workflow in a repo with plain unreleased git tags computes a normal bump from the latest tag rather than surprise-releasing it.
 
 > **Pinning caveat:** the nested `release.yml` call inside `auto-version.yml` is fixed at `@main` (GitHub can't parameterize `uses:`), so pinning `auto-version.yml` to a tag or SHA does **not** transitively pin the release pipeline. If you need a fully pinned release path, call `release.yml@<ref>` yourself from a tag-push workflow instead.
 
