@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: KotaHusky/cicd-toolkit/actions/turbo-setup@v2
+      - uses: KotaHusky/cicd-toolkit/actions/turbo-setup@main
         with:
           node-version: ${{ inputs.node-version }}
           pre-build-filter: ${{ inputs.pre-build-filter }}

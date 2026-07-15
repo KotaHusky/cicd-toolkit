@@ -22,7 +22,7 @@ Composite action that installs Node.js, restores/saves `node_modules` from cache
 ## Usage
 
 ```yaml
-- uses: KotaHusky/cicd-toolkit/actions/turbo-setup@v2
+- uses: KotaHusky/cicd-toolkit/actions/turbo-setup@main
   with:
     node-version: '24'
     pre-build-filter: '@my-org/shared'

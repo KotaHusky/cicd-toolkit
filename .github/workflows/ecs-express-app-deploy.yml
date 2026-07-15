@@ -191,7 +191,7 @@ jobs:
         shell: bash
         run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
       - id: mirror
-        uses: KotaHusky/cicd-toolkit/actions/ecr-mirror@v2
+        uses: KotaHusky/cicd-toolkit/actions/ecr-mirror@main
         with:
           source-image: ${{ steps.src.outputs.image }}@${{ needs.image.outputs.digest }}
           ecr-repo: ${{ inputs.app }}
