@@ -115,6 +115,24 @@ jobs:
           echo "prefix=${PREFIX}" >> "$GITHUB_OUTPUT"
           echo "preview-url=${PREVIEW_URL}" >> "$GITHUB_OUTPUT"
 
+      # Fork PRs receive no repository secrets — the deploy would hard-fail
+      # at AWS auth. Gate every subsequent step on the secret's presence and
+      # skip with a notice instead (mirrors build-verify's credential gate).
+      - name: Check deploy credentials
+        id: gate
+        shell: bash
+        working-directory: '.'
+        env:
+          ROLE_ARN: ${{ secrets.role-arn }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ROLE_ARN}" ]; then
+            echo "has-credentials=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-credentials=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=preview::No role-arn secret reached this run (expected for fork PRs, which never receive secrets) — preview deploy skipped."
+          fi
+
       - name: Set preview URL output
         id: set-url
         shell: bash
@@ -129,25 +147,25 @@ jobs:
       # DEPLOY PATH (opened / synchronize / reopened)
       # ------------------------------------------------------------------
       - uses: actions/checkout@v7
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.gate.outputs.has-credentials == 'true'
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
       # corepack must run before setup-node: its pnpm cache resolution
       # shells out to `pnpm store path`, which needs the corepack shim.
       - name: Enable corepack (pnpm)
-        if: github.event.action != 'closed' && inputs.package-manager == 'pnpm'
+        if: github.event.action != 'closed' && steps.gate.outputs.has-credentials == 'true' && inputs.package-manager == 'pnpm'
         shell: bash
         run: corepack enable
       - uses: actions/setup-node@v7
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.gate.outputs.has-credentials == 'true'
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
           cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.package-manager == 'pnpm' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
       - name: Install dependencies
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.gate.outputs.has-credentials == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -159,7 +177,7 @@ jobs:
           fi
 
       - name: Export build environment variables
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.gate.outputs.has-credentials == 'true'
         shell: bash
         env:
           PREVIEW_BASE_PATH_VAL: ${{ steps.coords.outputs.prefix }}
@@ -180,7 +198,7 @@ jobs:
           fi
 
       - name: Build
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.gate.outputs.has-credentials == 'true'
         shell: bash
         run: ${{ inputs.build-command }}
 
@@ -193,7 +211,7 @@ jobs:
       # relative to it (matching static-s3-deploy) — monorepo callers set
       # working-directory: apps/web and the output lands at apps/web/out.
       - name: Sync to S3
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.gate.outputs.has-credentials == 'true'
         id: sync
         shell: bash
         env:
@@ -216,7 +234,7 @@ jobs:
           echo "objects-synced=${COUNT}" >> "$GITHUB_OUTPUT"
 
       - name: Invalidate CloudFront cache (deploy)
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.gate.outputs.has-credentials == 'true'
         id: invalidate-deploy
         shell: bash
         working-directory: '.'
@@ -233,7 +251,7 @@ jobs:
           echo "invalidation-id=${INV_ID}" >> "$GITHUB_OUTPUT"
 
       - name: Upsert sticky PR comment (deployed)
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.gate.outputs.has-credentials == 'true'
         continue-on-error: true
         shell: bash
         working-directory: '.'
@@ -260,7 +278,7 @@ jobs:
 
           # Find an existing comment with the sentinel marker.
           EXISTING_ID=$(gh api --paginate "repos/${REPO}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select(.body | startswith("<!-- preview-env -->")) | .id' \
+            --jq '.[] | select((.body // "") | startswith("<!-- preview-env -->")) | .id' \
             | head -n1 || true)
 
           if [ -n "${EXISTING_ID}" ]; then
@@ -277,7 +295,7 @@ jobs:
       # TEARDOWN PATH (closed)
       # ------------------------------------------------------------------
       - name: Delete S3 prefix (teardown)
-        if: github.event.action == 'closed'
+        if: github.event.action == 'closed' && steps.gate.outputs.has-credentials == 'true'
         shell: bash
         working-directory: '.'
         env:
@@ -295,7 +313,7 @@ jobs:
           echo "::notice title=preview-teardown::Removed s3://${BUCKET}/${PREFIX}/"
 
       - name: Invalidate CloudFront cache (teardown)
-        if: github.event.action == 'closed'
+        if: github.event.action == 'closed' && steps.gate.outputs.has-credentials == 'true'
         id: invalidate-teardown
         shell: bash
         working-directory: '.'
@@ -312,7 +330,7 @@ jobs:
           echo "invalidation-id=${INV_ID}" >> "$GITHUB_OUTPUT"
 
       - name: Update sticky PR comment (torn down)
-        if: github.event.action == 'closed'
+        if: github.event.action == 'closed' && steps.gate.outputs.has-credentials == 'true'
         continue-on-error: true
         shell: bash
         working-directory: '.'
@@ -332,7 +350,7 @@ jobs:
           _The URL \`${PREVIEW_URL}\` is no longer active._"
 
           EXISTING_ID=$(gh api --paginate "repos/${REPO}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select(.body | startswith("<!-- preview-env -->")) | .id' \
+            --jq '.[] | select((.body // "") | startswith("<!-- preview-env -->")) | .id' \
             | head -n1 || true)
 
           if [ -n "${EXISTING_ID}" ]; then
