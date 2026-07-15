@@ -103,8 +103,11 @@ jobs:
         id: changelog
         env:
           GH_TOKEN: ${{ github.token }}
+          # Bound via env rather than interpolated into the script (script-
+          # injection hygiene; callers are trusted but the habit is cheap).
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          CURRENT_TAG="${{ inputs.tag || github.ref_name }}"
+          CURRENT_TAG="${RELEASE_TAG}"
           echo "current-tag=${CURRENT_TAG}" >> "$GITHUB_OUTPUT"
 
           # Find the previous semver tag (skip the current one) from the
@@ -447,9 +450,11 @@ jobs:
       # Common finalization for both auth paths: shape validation, the
       # mechanical deny-list gate, and composing version/date metadata.
       - name: Validate, deny-list, and finalize summary
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          TAG="${{ inputs.tag || github.ref_name }}"
+          TAG="${RELEASE_TAG}"
           VERSION="${TAG#v}"
           DATE=$(date -u +%Y-%m-%d)
           BODY_FILE=".whats-new-work/whats-new-body.json"
@@ -483,8 +488,9 @@ jobs:
       - name: Publish what's-new assets
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          TAG="${{ inputs.tag || github.ref_name }}"
+          TAG="${RELEASE_TAG}"
 
           if [ "${{ inputs.auto-publish }}" != "true" ]; then
             cp /tmp/whats-new.json /tmp/whats-new.draft.json

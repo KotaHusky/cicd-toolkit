@@ -234,6 +234,10 @@ Bump rules (matching semantic-release defaults): `feat!:`/`BREAKING CHANGE` → 
 
 The tag is created with the run's `GITHUB_TOKEN`, whose events don't trigger other workflows — `release.yml` is invoked directly as a nested workflow, so no PAT is needed and a tag-push release workflow can coexist without double-releasing. Manual `v*.*.*` tags keep working as an escape hatch and become the new baseline for the next auto bump.
 
+If a release run fails after tagging (leaving a tag with no GitHub Release), the next run — including a manual full re-run — detects the orphan and re-releases that tag instead of computing a new bump (`bump: retry`); commits merged in the meantime ship in the following release.
+
+> **Pinning caveat:** the nested `release.yml` call inside `auto-version.yml` is fixed at `@main` (GitHub can't parameterize `uses:`), so pinning `auto-version.yml` to a tag or SHA does **not** transitively pin the release pipeline. If you need a fully pinned release path, call `release.yml@<ref>` yourself from a tag-push workflow instead.
+
 ### End-User What's-New Summaries
 
 Releases are **two-tier**: the GitHub Release body stays engineer-focused and specific, while `release.yml` additionally generates a plain-language, end-user-facing summary your app can display — a `whats-new.json` (latest) and cumulative `releases.json` (last 20) attached to each release as assets. The artifact contract is versioned (`schemaVersion: 1`) and published at [`schemas/whats-new.schema.json`](schemas/whats-new.schema.json).
