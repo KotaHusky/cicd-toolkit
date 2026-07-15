@@ -25,3 +25,4 @@ export {
   ResolvedObservability,
   resolveObservability,
 } from './lib/constructs/ecs-express-observability';
+export { InviteGating, InviteGatingProps } from './packages/invite-gating/src/index';
