@@ -250,7 +250,7 @@ jobs:
 
 ### Preview Environments
 
-**`preview-s3-deploy.yml`** — Per-PR preview deploys for static sites: each PR's build lands at `s3://<bucket>/previews/pr-<N>/`, a sticky comment posts the preview URL, and closing the PR tears the prefix down. Pairs with the production `static-s3-deploy.yml` on the same bucket/distribution.
+**`preview-s3-deploy.yml`** — Per-PR preview deploys for static sites: each PR's build lands at `s3://<bucket>/previews/pr-<N>/`, a sticky comment posts the preview URL, and closing the PR tears the prefix down. Pairs with the production `static-s3-deploy.yml` on the same bucket/distribution — production syncs exclude the reserved `previews/` prefix, so a prod deploy (even with `sync-delete: true`) never touches live previews.
 
 ```yaml
 on:

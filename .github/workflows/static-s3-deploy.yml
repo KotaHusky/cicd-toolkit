@@ -219,8 +219,12 @@ jobs:
           fi
 
           # Default short cache for everything (HTML, etc.)
+          # previews/ is excluded so a production deploy with --delete never
+          # wipes live PR previews (preview-s3-deploy.yml shares the bucket
+          # under that reserved prefix); harmless when previews aren't used.
           aws s3 sync "${{ inputs.build-output-dir }}/" "s3://${{ inputs.bucket-name }}/" \
             $DELETE_FLAG \
+            --exclude "previews/*" \
             --cache-control "public, max-age=60, must-revalidate" \
             | tee /tmp/sync.log
 
