@@ -1,6 +1,6 @@
 {
   "name": "cicd-toolkit",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Integrate KotaHusky/cicd-toolkit reusable GitHub Actions workflows, composite actions, and AWS CDK constructs into a consumer repo \u2014 workflow selection, secrets setup, and OIDC bootstrap.",
   "author": {
     "name": "KotaHusky"

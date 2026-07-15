@@ -1,6 +1,6 @@
 ---
 name: integrate-cicd-toolkit
-description: Integrate KotaHusky/cicd-toolkit reusable workflows and composite actions into the current repo — pick the right workflow, wire up the caller file, and set required secrets securely. Use when adding CI/CD (build verification, commitlint, Docker/GHCR, CDK deploys, static-site S3/CloudFront deploys, ECS Express deploys, AI-generated releases) to a repo that consumes cicd-toolkit.
+description: Integrate KotaHusky/cicd-toolkit reusable workflows and composite actions into the current repo — pick the right workflow, wire up the caller file, and set required secrets securely. Use when adding CI/CD (build verification, commitlint, Docker/GHCR, CDK deploys, static-site S3/CloudFront deploys, ECS Express deploys, automatic versioning, AI-generated releases) to a repo that consumes cicd-toolkit.
 ---
 
 # Integrate cicd-toolkit
@@ -33,9 +33,10 @@ Adapt the example rather than authoring a caller from scratch.
 | Deploy AWS CDK app (OIDC auth) | `cdk-deploy.yml` (synth-only check: `cdk-synth.yml`) |
 | Static site (Next.js/Astro/Vite) → S3 + CloudFront | `static-s3-deploy.yml` |
 | Node/Express app → ECS Fargate | `ecs-express-deploy.yml` / `ecs-express-app-deploy.yml` |
-| GitHub Release with AI-generated notes on `v*` tag | `release.yml` |
+| Automatic versioning + AI release on every merge to main (recommended) | `auto-version.yml` — computes the semver bump from conventional commits (no checkout, pure API), tags, and runs `release.yml`; pair with `commitlint.yml`. Caller needs `contents: write` |
+| GitHub Release with AI-generated notes on manual `v*` tag | `release.yml` |
 | Claude AI review on every PR (inline + sticky summary) | `claude-review.yml` — needs the [Claude GitHub App](https://github.com/apps/claude) installed and `ANTHROPIC_API_KEY` **or** `CLAUDE_CODE_OAUTH_TOKEN`; advisory by default (never blocks CI), `strict: true` to enforce |
-| Semver tag automation | `semver-tag.yml` |
+| Semver tag automation (tag only — does not chain to a release; prefer `auto-version.yml`) | `semver-tag.yml` |
 | End-user "what's new" panel in the app | `release.yml` (whats-new assets) + `whats-new-path` input on `static-s3-deploy.yml`/`docker-ghcr.yml` + `cicd-toolkit/lib/whats-new` — see the What's-New section below |
 | Azure Container Apps | `aca-provision.yml`, `aca-deploy.yml` |
 | Cloudflare DNS management | `cloudflare-dns.yml` |
@@ -119,10 +120,11 @@ reply.
 
 ## What's-New summaries (end-user release notes)
 
-`release.yml` produces two tiers on every `v*` tag: engineer-focused notes (the
-GitHub Release body) and a public, end-user-facing `whats-new.json` +
-`releases.json` (release assets) generated from a curated context file,
-sanitized by a redaction judge, and gated by a deny-list.
+`release.yml` produces two tiers on every release (auto via `auto-version.yml`
+or a manual `v*` tag): engineer-focused notes (the GitHub Release body) and a
+public, end-user-facing `whats-new.json` + `releases.json` (release assets)
+generated from a curated context file, sanitized by a redaction judge, and
+gated by a deny-list.
 
 **When wiring this up in a consumer repo:**
 
@@ -154,5 +156,8 @@ blocks publication if they ever appear in a summary.
 
 - Consumers pin `@main` — toolkit changes ship to this repo immediately on merge upstream. Pin a tag or SHA if the consumer needs stability.
 - Grant each caller job the `permissions:` block shown in the toolkit README for that workflow (OIDC deploys need `id-token: write`).
-- `release.yml` and `commitlint.yml` assume Conventional Commit messages.
+- `release.yml`, `auto-version.yml`, and `commitlint.yml` assume Conventional
+  Commit messages. With `auto-version.yml`, commit types decide versioning
+  (feat → minor, fix/perf → patch, breaking → major; docs/chore/ci release
+  nothing) — enforce them with `commitlint.yml` or versions will drift.
 - Verify by opening a small PR (or pushing a tag for release flows) and watching the run — reusable workflows can't be executed locally.

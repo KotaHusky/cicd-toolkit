@@ -3,6 +3,14 @@ name: Reusable AI-Powered Release
 on:
   workflow_call:
     inputs:
+      tag:
+        description: >-
+          Tag to release (e.g. v2.6.0). Defaults to the triggering ref, which
+          is correct for tag-push callers; workflow-call chains that create
+          the tag themselves (e.g. auto-version.yml) must pass it explicitly.
+        required: false
+        type: string
+        default: ''
       model:
         description: 'Claude model for release notes and the what''s-new summary'
         required: false
@@ -96,7 +104,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          CURRENT_TAG="${{ github.ref_name }}"
+          CURRENT_TAG="${{ inputs.tag || github.ref_name }}"
           echo "current-tag=${CURRENT_TAG}" >> "$GITHUB_OUTPUT"
 
           # Find the previous semver tag (skip the current one) from the
@@ -441,7 +449,7 @@ jobs:
       - name: Validate, deny-list, and finalize summary
         run: |
           set -euo pipefail
-          TAG="${{ github.ref_name }}"
+          TAG="${{ inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
           DATE=$(date -u +%Y-%m-%d)
           BODY_FILE=".whats-new-work/whats-new-body.json"
@@ -476,7 +484,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ github.ref_name }}"
+          TAG="${{ inputs.tag || github.ref_name }}"
 
           if [ "${{ inputs.auto-publish }}" != "true" ]; then
             cp /tmp/whats-new.json /tmp/whats-new.draft.json
