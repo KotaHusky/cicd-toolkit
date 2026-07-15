@@ -112,7 +112,7 @@ jobs:
                       run_block = step.get('run')
                       if not run_block:
                           continue
-                      # Substitute all ${{ ... }} expressions so bash -n
+                      # Substitute all GitHub expression tokens so bash -n
                       # doesn't choke on GitHub Actions interpolation syntax.
                       sanitised = EXPR_RE.sub(f'"{PLACEHOLDER}"', run_block)
                       result = subprocess.run(
