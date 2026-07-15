@@ -31,37 +31,63 @@ export async function handler(event: AdminEvent) {
       const labels = parseLabels(event);
       const generated: Array<{ code: string; label: string; inviteUrl: string }> = [];
       for (const label of labels) {
-        const code = generateCode();
         const expiresAt = Math.floor(Date.now() / 1000) + EXPIRY_DAYS * 86400;
-        await ddb.send(
-          new PutCommand({
-            TableName: TABLE,
-            Item: {
-              pk: 'INVITE_CODE',
-              sk: `CODE#${code}`,
-              code,
-              label,
-              createdAt: new Date().toISOString(),
-              expiresAt,
-            },
-          }),
-        );
+        // Guard against the (rare) case where a freshly generated code collides
+        // with an existing item. An unconditional Put would silently overwrite an
+        // active or already-claimed code. We retry up to 3 times on collision.
+        let code = '';
+        let attempts = 0;
+        while (attempts < 3) {
+          code = generateCode();
+          attempts++;
+          try {
+            await ddb.send(
+              new PutCommand({
+                TableName: TABLE,
+                Item: {
+                  pk: 'INVITE_CODE',
+                  sk: `CODE#${code}`,
+                  code,
+                  label,
+                  createdAt: new Date().toISOString(),
+                  expiresAt,
+                },
+                ConditionExpression: 'attribute_not_exists(sk)',
+              }),
+            );
+            break;
+          } catch (err: any) {
+            if (err.name === 'ConditionalCheckFailedException' && attempts < 3) {
+              continue;
+            }
+            throw err;
+          }
+        }
         generated.push({ code, label, inviteUrl: `https://${APP_DOMAIN}/signup?code=${code}` });
       }
       return { generated };
     }
 
     case 'list': {
-      const result = await ddb.send(
-        new QueryCommand({
-          TableName: TABLE,
-          KeyConditionExpression: 'pk = :pk',
-          ExpressionAttributeValues: { ':pk': 'INVITE_CODE' },
-          ScanIndexForward: false,
-        }),
-      );
+      const items: any[] = [];
+      let lastKey: Record<string, any> | undefined;
+      // Paginate until DynamoDB signals no more results via LastEvaluatedKey.
+      do {
+        const result = await ddb.send(
+          new QueryCommand({
+            TableName: TABLE,
+            KeyConditionExpression: 'pk = :pk',
+            ExpressionAttributeValues: { ':pk': 'INVITE_CODE' },
+            ScanIndexForward: false,
+            ExclusiveStartKey: lastKey,
+          }),
+        );
+        items.push(...(result.Items ?? []));
+        lastKey = result.LastEvaluatedKey;
+      } while (lastKey !== undefined);
+
       const nowSec = Math.floor(Date.now() / 1000);
-      const codes = (result.Items ?? []).map((item) => ({
+      const codes = items.map((item) => ({
         code: item.code as string,
         label: (item.label as string) ?? null,
         inviteUrl: `https://${APP_DOMAIN}/signup?code=${item.code}`,

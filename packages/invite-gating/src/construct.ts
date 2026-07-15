@@ -126,7 +126,9 @@ export class InviteGating extends Construct {
             'ssm:ListAutomationExecutions',
           ],
           resources: [
-            `arn:aws:ssm:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:automation-definition/${resourcePrefix}-invite-admin-runbook:*`,
+            // Use cdk.Stack.of(this).partition so this ARN resolves correctly
+            // in GovCloud (aws-us-gov) and China (aws-cn) regions too.
+            `arn:${cdk.Stack.of(this).partition}:ssm:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:automation-definition/${resourcePrefix}-invite-admin-runbook:*`,
           ],
         }),
         new iam.PolicyStatement({
@@ -143,13 +145,12 @@ export class InviteGating extends Construct {
     this.adminPolicyArn = adminPolicy.managedPolicyArn;
 
     // ── SSM Automation document ─────────────────────────────────────────
-    const payload = JSON.stringify({
-      action: '{{ Action }}',
-      label: '{{ Label }}',
-      labels: '{{ Labels }}',
-      code: '{{ Code }}',
-    });
-
+    // SAFETY: never build the Lambda payload by textual {{ Param }} substitution
+    // inside a JSON string literal — SSM substitution is textual, so a value
+    // containing a double-quote or backslash produces invalid JSON, and a crafted
+    // value could inject extra JSON keys. Instead we use an aws:executeScript step
+    // that receives each SSM parameter as a discrete script variable and
+    // JSON-encodes them before forwarding to the Lambda invoke step.
     new ssm.CfnDocument(this, 'AdminRunbook', {
       name: `${resourcePrefix}-invite-admin-runbook`,
       documentType: 'Automation',
@@ -186,11 +187,38 @@ export class InviteGating extends Construct {
         },
         mainSteps: [
           {
+            // Build the Lambda payload via JSON.stringify so special characters in
+            // Label/Labels/Code cannot break JSON structure or inject extra keys.
+            name: 'BuildPayload',
+            action: 'aws:executeScript',
+            inputs: {
+              Runtime: 'python3.11',
+              Handler: 'script_handler',
+              InputPayload: {
+                action: '{{ Action }}',
+                label: '{{ Label }}',
+                labels: '{{ Labels }}',
+                code: '{{ Code }}',
+              },
+              Script: [
+                'import json',
+                'def script_handler(events, context):',
+                '    return {"payload": json.dumps({',
+                '        "action":  events["action"],',
+                '        "label":   events["label"],',
+                '        "labels":  events["labels"],',
+                '        "code":    events["code"],',
+                '    })}',
+              ].join('\n'),
+            },
+            outputs: [{ Name: 'Payload', Selector: '$.Payload.payload', Type: 'String' }],
+          },
+          {
             name: 'InvokeAdminLambda',
             action: 'aws:invokeLambdaFunction',
             inputs: {
               FunctionName: adminFn.functionName,
-              Payload: payload,
+              Payload: '{{ BuildPayload.Payload }}',
             },
             outputs: [{ Name: 'Result', Selector: '$.Payload', Type: 'String' }],
           },

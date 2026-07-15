@@ -808,7 +808,8 @@ CloudWatch dashboard (ALB + ECS service metrics) and the tiered alarm set used b
 Self-contained L3 construct (the first resident of `packages/`, with its own build, tests, and prebuilt Lambda assets): gates Cognito user-pool signups behind single-use invite codes. A pre-signup Lambda atomically claims codes via conditional DynamoDB writes; admins generate/list/revoke through an SSM Automation runbook, with layered IAM (human → automation role → Lambda → table).
 
 ```ts
-import { InviteGating } from 'cicd-toolkit/packages/invite-gating/src';
+// Build the package first: cd packages/invite-gating && npm ci && npm run build
+import { InviteGating } from '@cicd-toolkit/invite-gating';
 
 new InviteGating(this, 'InviteGating', {
   userPool,           // attaches the pre-signup trigger

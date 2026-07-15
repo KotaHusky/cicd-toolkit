@@ -40,6 +40,37 @@ describe('admin handler', () => {
     expect(cmd.Item.sk).toMatch(/^CODE#[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/);
   });
 
+  it('generate: uses attribute_not_exists(sk) condition to prevent overwriting existing codes', async () => {
+    await handler({ action: 'generate', label: 'Test' });
+    const cmd = mockSend.mock.calls[0][0];
+    expect(cmd.ConditionExpression).toBe('attribute_not_exists(sk)');
+  });
+
+  it('generate: retries on ConditionalCheckFailedException (code collision) and succeeds', async () => {
+    mockSend
+      .mockRejectedValueOnce(
+        Object.assign(new Error('condition'), { name: 'ConditionalCheckFailedException' }),
+      )
+      .mockResolvedValueOnce({});
+    const result = await handler({ action: 'generate', label: 'Collision' });
+    expect(result.generated).toHaveLength(1);
+    expect(mockSend).toHaveBeenCalledTimes(2);
+  });
+
+  it('generate: throws after 3 collision attempts', async () => {
+    const collisionErr = Object.assign(new Error('condition'), {
+      name: 'ConditionalCheckFailedException',
+    });
+    mockSend
+      .mockRejectedValueOnce(collisionErr)
+      .mockRejectedValueOnce(collisionErr)
+      .mockRejectedValueOnce(collisionErr);
+    await expect(handler({ action: 'generate', label: 'Persistent' })).rejects.toMatchObject({
+      name: 'ConditionalCheckFailedException',
+    });
+    expect(mockSend).toHaveBeenCalledTimes(3);
+  });
+
   it('generate: creates multiple codes from comma-separated labels', async () => {
     const result = await handler({ action: 'generate', labels: 'Alex, Bob, Sam' });
     expect(result.generated).toHaveLength(3);
@@ -99,6 +130,33 @@ describe('admin handler', () => {
     mockSend.mockResolvedValue({ Items: [] });
     const result = await handler({ action: 'list' });
     expect(result.codes).toEqual([]);
+  });
+
+  it('list: paginates until LastEvaluatedKey is undefined', async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const page1Item = { pk: 'INVITE_CODE', sk: 'CODE#AAAAAAAA', code: 'AAAAAAAA', createdAt: '2026-01-01T00:00:00.000Z', expiresAt: nowSec + 1000 };
+    const page2Item = { pk: 'INVITE_CODE', sk: 'CODE#BBBBBBBB', code: 'BBBBBBBB', createdAt: '2026-01-01T00:00:00.000Z', expiresAt: nowSec + 1000 };
+
+    mockSend
+      .mockResolvedValueOnce({
+        Items: [page1Item],
+        LastEvaluatedKey: { pk: 'INVITE_CODE', sk: 'CODE#AAAAAAAA' },
+      })
+      .mockResolvedValueOnce({
+        Items: [page2Item],
+        // No LastEvaluatedKey — signals last page.
+      });
+
+    const result = await handler({ action: 'list' });
+    expect(result.codes).toHaveLength(2);
+    expect(result.codes![0].code).toBe('AAAAAAAA');
+    expect(result.codes![1].code).toBe('BBBBBBBB');
+    expect(mockSend).toHaveBeenCalledTimes(2);
+    // Second call must carry ExclusiveStartKey from the first response.
+    expect(mockSend.mock.calls[1][0].ExclusiveStartKey).toEqual({
+      pk: 'INVITE_CODE',
+      sk: 'CODE#AAAAAAAA',
+    });
   });
 
   // ── revoke ────────────────────────────────────────────────────────────

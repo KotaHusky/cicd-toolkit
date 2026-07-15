@@ -14,11 +14,16 @@ process.env.RESOURCE_PREFIX = 'test';
 const { handler } = await import('../lambdas/presignup/handler.js');
 
 type MockEvent = {
+  triggerSource: string;
   request: { userAttributes: Record<string, string> };
 };
 
-function makeEvent(code: string, email = 'user@example.com'): MockEvent {
-  return { request: { userAttributes: { 'custom:inviteCode': code, email } } };
+function makeEvent(
+  code: string,
+  email = 'user@example.com',
+  triggerSource = 'PreSignUp_SignUp',
+): MockEvent {
+  return { triggerSource, request: { userAttributes: { 'custom:inviteCode': code, email } } };
 }
 
 describe('presignup handler', () => {
@@ -26,6 +31,24 @@ describe('presignup handler', () => {
     vi.clearAllMocks();
     mockSend.mockResolvedValue({});
   });
+
+  // ── triggerSource guard ───────────────────────────────────────────────
+
+  it('bypasses code check for PreSignUp_AdminCreateUser', async () => {
+    const event = makeEvent('', 'admin@example.com', 'PreSignUp_AdminCreateUser');
+    const result = await handler(event as any);
+    expect(result).toBe(event);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('bypasses code check for PreSignUp_ExternalProvider (federated IdP)', async () => {
+    const event = makeEvent('', 'fed@example.com', 'PreSignUp_ExternalProvider');
+    const result = await handler(event as any);
+    expect(result).toBe(event);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  // ── format validation ─────────────────────────────────────────────────
 
   it('returns the event when code is valid and unclaimed', async () => {
     const event = makeEvent('ABCDEFGH');
@@ -60,6 +83,28 @@ describe('presignup handler', () => {
     await expect(handler(makeEvent('ABCDEFG') as any)).rejects.toThrow('Invalid invite code');
     await expect(handler(makeEvent('ABCDEFGHI') as any)).rejects.toThrow('Invalid invite code');
   });
+
+  // ── expiry enforcement at claim ───────────────────────────────────────
+
+  it('includes expiresAt > :now in the condition expression', async () => {
+    await handler(makeEvent('ABCDEFGH') as any);
+    const cmd = mockSend.mock.calls[0][0];
+    expect(cmd.ConditionExpression).toContain('expiresAt > :now');
+    const now = Math.floor(Date.now() / 1000);
+    expect(cmd.ExpressionAttributeValues[':now']).toBeGreaterThanOrEqual(now - 2);
+    expect(cmd.ExpressionAttributeValues[':now']).toBeLessThanOrEqual(now + 2);
+  });
+
+  it('rejects an expired code even when DynamoDB TTL has not yet deleted it', async () => {
+    // DynamoDB raises ConditionalCheckFailedException because expiresAt <= :now
+    // (item still physically exists but TTL hasn't cleaned it up yet).
+    mockSend.mockRejectedValue(
+      Object.assign(new Error('condition'), { name: 'ConditionalCheckFailedException' }),
+    );
+    await expect(handler(makeEvent('ABCDEFGH') as any)).rejects.toThrow('Invalid invite code');
+  });
+
+  // ── other DynamoDB errors ─────────────────────────────────────────────
 
   it('rejects an already-used code (ConditionalCheckFailedException)', async () => {
     mockSend.mockRejectedValue(
