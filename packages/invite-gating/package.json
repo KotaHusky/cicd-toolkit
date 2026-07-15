@@ -7,6 +7,7 @@
   "files": ["dist/**", "assets/**"],
   "scripts": {
     "build": "node build.mjs && tsc",
+    "prepare": "node build.mjs && tsc",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
