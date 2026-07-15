@@ -29,6 +29,29 @@ export interface StaticSiteStackProps extends cdk.StackProps {
   /** Optional additional aliases (e.g. ['www.example.org']). Ignored when
    *  `domainName` is unset. */
   additionalAliases?: string[];
+  /**
+   * Attach a CloudFront Function (viewer-request) that rewrites directory
+   * URIs to their index.html equivalents. Required when serving sub-path
+   * deployments (e.g. PR preview environments at /previews/pr-42/) because
+   * S3 REST origins do not honour S3's website-hosting directory index docs.
+   *
+   * Rewrite rules applied in order:
+   *  1. URI ends with `/`  →  append `index.html`
+   *  2. Last path segment has no `.`  →  append `/index.html`
+   *     (handles bare paths like /about or /previews/pr-42/dashboard)
+   *
+   * Defaults to `false`.
+   *
+   * **Interaction with `spaFallback`:** Both props can be enabled together.
+   * The CloudFront Function rewrites the viewer request *before* CloudFront
+   * forwards to the origin, so the SPA error-response rules (which fire on
+   * 403/404 *from the origin*) remain fully effective for any path that is
+   * genuinely missing. Precedence: index-rewrite runs first (viewer-request
+   * event); spaFallback's custom error responses run after the origin
+   * responds. Enable `spaFallback` as well when the app uses client-side
+   * routing inside the preview path.
+   */
+  previewIndexRewrite?: boolean;
 }
 
 /**
@@ -84,12 +107,46 @@ export class StaticSiteStack extends cdk.Stack {
       });
     }
 
+    // Attach an index-rewrite CloudFront Function when opted in.
+    // The function runs at the viewer-request event and normalises directory
+    // URIs so that S3 REST origins (which ignore S3 website index docs)
+    // serve index.html for bare directory paths.
+    let indexRewriteFunction: cloudfront.FunctionAssociation[] | undefined;
+    if (props.previewIndexRewrite) {
+      const rewriteFn = new cloudfront.Function(this, 'IndexRewriteFn', {
+        code: cloudfront.FunctionCode.fromInline(
+          // CloudFront Functions runtime: ECMAScript 5.1 strict subset.
+          // No template literals, no const/let — use var and string concat.
+          [
+            'function handler(event) {',
+            '  var uri = event.request.uri;',
+            '  if (uri.slice(-1) === "/") {',
+            '    event.request.uri = uri + "index.html";',
+            '  } else if (uri.lastIndexOf(".") <= uri.lastIndexOf("/")) {',
+            '    event.request.uri = uri + "/index.html";',
+            '  }',
+            '  return event.request;',
+            '}',
+          ].join('\n'),
+        ),
+        runtime: cloudfront.FunctionRuntime.JS_2_0,
+        comment: 'Rewrite directory URIs to index.html for S3 REST origin sub-path deployments',
+      });
+      indexRewriteFunction = [
+        {
+          function: rewriteFn,
+          eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+        },
+      ];
+    }
+
     const defaultBehavior: cloudfront.BehaviorOptions = {
       origin: origins.S3BucketOrigin.withOriginAccessControl(this.bucket),
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
       compress: true,
       allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+      ...(indexRewriteFunction ? { functionAssociations: indexRewriteFunction } : {}),
     };
 
     const errorResponses: cloudfront.ErrorResponse[] = props.spaFallback

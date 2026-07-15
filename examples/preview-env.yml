@@ -1,0 +1,57 @@
+# Example: per-PR preview environments for static sites (S3 + CloudFront).
+# Copy to .github/workflows/preview-env.yml in your repo.
+#
+# Prerequisites:
+#   1. Deploy StaticSiteStack with previewIndexRewrite: true (see lib/stacks/static-site-stack.ts).
+#      This adds a CloudFront Function that rewrites /previews/pr-42/ -> /previews/pr-42/index.html
+#      so S3 REST origins serve directory index documents correctly.
+#   2. Your app's build must honour the PREVIEW_BASE_PATH and PREVIEW_URL env vars
+#      injected automatically by this workflow. Examples:
+#        Next.js:    basePath: process.env.PREVIEW_BASE_PATH ?? ''
+#        Vite:       base: process.env.PREVIEW_BASE_PATH ?? '/'
+#        CRA:        PUBLIC_URL is set via PREVIEW_BASE_PATH (set PUBLIC_URL=... in build-args)
+#   3. Bootstrap GitHub -> AWS OIDC and store the role ARN as AWS_DEPLOY_ROLE_ARN
+#      (see the README's "OIDC Bootstrap" section).
+#
+# Behaviour:
+#   opened / synchronize / reopened  — builds the site and deploys to
+#     s3://<bucket>/previews/pr-<num>/, invalidates CloudFront, and posts (or
+#     updates) a sticky comment on the PR with the preview URL + deployed SHA.
+#   closed  — removes s3://<bucket>/previews/pr-<num>/ and updates the comment.
+
+name: Preview Environment
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+# Permissions required by the reusable workflow.
+# pull-requests: write is needed to post/update the sticky PR comment.
+# id-token: write is needed for AWS OIDC authentication.
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/preview-s3-deploy.yml@main
+    with:
+      bucket-name: ${{ vars.PREVIEW_BUCKET_NAME }}
+      distribution-id: ${{ vars.PREVIEW_DISTRIBUTION_ID }}
+      # The CloudFront domain the preview is reachable on.
+      # Use the distribution's domain name (e.g. d1234abcd.cloudfront.net)
+      # or a custom domain you've aliased to the distribution.
+      preview-domain: preview.example.com
+      # Optional: override defaults when your project differs.
+      # node-version: '20'
+      # package-manager: 'pnpm'
+      # build-command: 'npm run build:preview'
+      # build-output-dir: 'dist'
+      # working-directory: 'apps/web'
+      # Additional per-build env vars (KEY=VALUE, one per line).
+      # PREVIEW_BASE_PATH and PREVIEW_URL are always set automatically.
+      # build-args: |
+      #   NEXT_PUBLIC_API_URL=https://api.example.com
+    secrets:
+      role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
