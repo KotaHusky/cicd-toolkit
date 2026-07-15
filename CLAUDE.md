@@ -36,6 +36,10 @@ any one consumer project:
 - The library entry point is the ROOT `index.ts` barrel (consumers
   `import { X } from 'cicd-toolkit'` via a git dep) — new public stacks and
   constructs must be exported there. There is deliberately no `lib/index.ts`.
+- `packages/*` holds self-contained packages (own package.json, build, tests,
+  prebuilt assets) — e.g. `invite-gating`. Root vitest covers only `test/**`;
+  ci.yml runs each package's own suite in a separate step. Keep new packages
+  self-contained and never import them from `lib/`.
 - Releases are automatic: every merge to `main` runs `self-auto-version.yml`,
   which computes the semver bump from the conventional commits (feat → minor,
   fix/perf → patch, breaking → major; docs/chore/ci → no release), tags, and

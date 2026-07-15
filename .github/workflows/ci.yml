@@ -31,6 +31,39 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # Self-contained packages under packages/ carry their own test suites
+      # (root vitest only covers test/**) — run each so they gate CI too.
+      - name: Run package tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for PKG in packages/*/package.json; do
+            [ -e "$PKG" ] || continue
+            DIR=$(dirname "$PKG")
+            echo "::group::${DIR}"
+            # Asset-drift guard: snapshot committed zip content BEFORE npm ci,
+            # because the prepare script (node build.mjs) rebuilds them during
+            # install — snapshotting after install would always diff clean.
+            # Reading from git guarantees we see what was actually committed.
+            if compgen -G "$DIR/assets/*.zip" > /dev/null; then
+              for Z in "$DIR"/assets/*.zip; do
+                TMP_ZIP=$(mktemp /tmp/asset-XXXXXX.zip)
+                git show "HEAD:$Z" > "$TMP_ZIP"
+                unzip -p "$TMP_ZIP" | shasum -a 256
+                rm -f "$TMP_ZIP"
+              done > /tmp/assets-committed.txt
+            fi
+            (cd "$DIR" && npm ci && npm test)
+            if [ -f /tmp/assets-committed.txt ]; then
+              (cd "$DIR" && npm run build > /dev/null)
+              for Z in "$DIR"/assets/*.zip; do unzip -p "$Z" | shasum -a 256; done > /tmp/assets-rebuilt.txt
+              diff /tmp/assets-committed.txt /tmp/assets-rebuilt.txt \
+                || { echo "::error title=asset-drift::Committed Lambda zips in $DIR/assets don't match a fresh build — run npm run build there and commit the zips."; exit 1; }
+              rm -f /tmp/assets-committed.txt /tmp/assets-rebuilt.txt
+            fi
+            echo "::endgroup::"
+          done
+
   actionlint:
     name: Actionlint
     runs-on: ubuntu-latest

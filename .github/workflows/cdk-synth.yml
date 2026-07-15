@@ -28,6 +28,10 @@ on:
         required: false
         type: boolean
         default: true
+    secrets:
+      node-auth-token:
+        description: 'Token for installing private GitHub Packages (npm) deps. Optional.'
+        required: false
 
 concurrency:
   group: cdk-synth-${{ github.workflow }}-${{ github.ref }}
@@ -37,6 +41,8 @@ jobs:
   synth:
     name: CDK Synth
     runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.node-auth-token }}
     steps:
       - uses: actions/checkout@v7
 
@@ -44,6 +50,17 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           pre-build-filter: ${{ inputs.pre-build-filter }}
+
+      # Wire NODE_AUTH_TOKEN into npm auth for @kotahusky/* packages on GitHub
+      # Packages. turbo-setup doesn't run setup-node with registry-url/scope so
+      # no .npmrc entry is generated automatically — add one when the secret is
+      # provided. Consumers must also have an .npmrc routing @kotahusky:registry
+      # to https://npm.pkg.github.com (see cdk-synth README section).
+      - name: Configure GitHub Packages npm auth
+        if: env.NODE_AUTH_TOKEN != ''
+        run: |
+          echo "@kotahusky:registry=https://npm.pkg.github.com" >> "${HOME}/.npmrc"
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> "${HOME}/.npmrc"
 
       - name: CDK synth (dry run)
         shell: bash

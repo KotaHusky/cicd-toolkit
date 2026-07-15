@@ -1,0 +1,32 @@
+{
+  "name": "@kotahusky/cognito-invite-gating",
+  "version": "1.0.0",
+  "description": "CDK L3 construct: invite-code gating for Cognito user pools",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist/**", "assets/**"],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "scripts": {
+    "build": "node build.mjs && tsc",
+    "prepare": "node build.mjs && tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "aws-cdk-lib": "^2.0.0",
+    "constructs": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^20.0.0",
+    "@aws-sdk/client-dynamodb": "^3.0.0",
+    "@aws-sdk/lib-dynamodb": "^3.0.0",
+    "aws-cdk-lib": "^2.261.0",
+    "constructs": "^10.6.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
+  }
+}
