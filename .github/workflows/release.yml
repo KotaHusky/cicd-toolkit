@@ -242,9 +242,14 @@ jobs:
             DRAFT_FLAG="--draft"
           fi
 
+          # --generate-notes appends GitHub's computed "What's Changed" +
+          # Contributors footer (derived from merged PRs between the tags) —
+          # authoritative contributor credit that text in commit messages
+          # cannot spoof, unlike @-mentions in the body.
           RELEASE_URL=$(gh release create "$TAG" \
             --title "$RELEASE_TITLE" \
             --notes "$RELEASE_BODY" \
+            --generate-notes \
             --verify-tag \
             $DRAFT_FLAG)
 
