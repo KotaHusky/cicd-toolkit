@@ -69,7 +69,9 @@ on:
         description: 'The tag that was created and released (empty when nothing was releasable)'
         value: ${{ jobs.version.outputs.tag }}
       bump:
-        description: 'The computed bump: major, minor, patch, or none'
+        description: >-
+          The computed bump: major, minor, patch, none, or retry (an earlier
+          run tagged but failed to release; this run re-released that tag)
         value: ${{ jobs.version.outputs.bump }}
 
 concurrency:
@@ -104,6 +106,26 @@ jobs:
           LAST=$(gh api --paginate "repos/${REPO}/tags" --jq '.[].name' \
             | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)
 
+          # Self-heal an orphaned tag: if the last tag has no GitHub Release,
+          # a prior release run failed after tagging. Re-release that tag
+          # instead of computing a new bump — otherwise its commits would be
+          # skipped forever (the next compare starts from it). Commits since
+          # the orphan ship in the next releasable merge. Skipped for draft
+          # releases, which the releases/tags endpoint cannot see.
+          if [ -n "$LAST" ] && [ "${{ inputs.draft }}" != "true" ] \
+             && ! gh api "repos/${REPO}/releases/tags/${LAST}" > /dev/null 2>&1; then
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "bump=retry" >> "$GITHUB_OUTPUT"
+              echo "tag=" >> "$GITHUB_OUTPUT"
+              echo "::notice title=auto-version::Dry run — ${LAST} is tagged but unreleased; a real run would re-release it."
+              exit 0
+            fi
+            echo "bump=retry" >> "$GITHUB_OUTPUT"
+            echo "tag=${LAST}" >> "$GITHUB_OUTPUT"
+            echo "::warning title=auto-version::${LAST} is tagged but has no GitHub Release (a prior release run failed) — re-releasing it. Commits merged since will ship in the next release."
+            exit 0
+          fi
+
           if [ -z "$LAST" ]; then
             BUMP="minor"
             NEW="v${INITIAL}"
@@ -122,8 +144,11 @@ jobs:
               | jq -r '.commits[] | select(.parents | length == 1) | .commit.message | split("\n")[0]')
 
             BUMP="none"
+            # Breaking markers: a bang type (feat!:) in a subject, or a
+            # BREAKING CHANGE / BREAKING-CHANGE footer line — anchored so
+            # prose that merely mentions the phrase can't force a major.
             if printf '%s' "$SUBJECTS" | grep -qE '^[a-z]+(\([^)]*\))?!:' \
-               || printf '%s' "$MESSAGES" | grep -q 'BREAKING CHANGE'; then
+               || printf '%s' "$MESSAGES" | grep -qE '^BREAKING[ -]CHANGE:'; then
               BUMP="major"
             elif printf '%s' "$SUBJECTS" | grep -qE '^feat(\([^)]*\))?:'; then
               BUMP="minor"
@@ -184,23 +209,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # Shallow: HEAD is the release commit, which is all the floating tags
-      # need to point at. fetch-tags: true is fatal on tag-push events
+      # Shallow: only the released tag's commit is needed; it is fetched
+      # explicitly below. fetch-tags: true is fatal on tag-push events
       # (actions/checkout#1467) and unnecessary here.
       - uses: actions/checkout@v7
 
       - name: Advance floating tags
         shell: bash
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
-          # e.g. v2.5.4 → advance v2 and v2.5 to point at this commit
-          TAG="${{ needs.version.outputs.tag }}"
+          # e.g. v2.5.4 → advance v2 and v2.5 to point at its commit.
+          # Anchored to the tag, not HEAD — on a retry release (orphaned
+          # tag healed by a later push) HEAD is newer than the release.
           if [[ "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
             MAJOR="v${BASH_REMATCH[1]}"
             MINOR="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+            git fetch --depth=1 origin "refs/tags/${TAG}:refs/tags/${TAG}"
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -fa "$MAJOR" -m "Update floating tag $MAJOR → $TAG"
-            git tag -fa "$MINOR" -m "Update floating tag $MINOR → $TAG"
+            git tag -fa "$MAJOR" -m "Update floating tag $MAJOR → $TAG" "$TAG"
+            git tag -fa "$MINOR" -m "Update floating tag $MINOR → $TAG" "$TAG"
             git push origin "$MAJOR" "$MINOR" --force
             echo "Advanced $MAJOR and $MINOR to $TAG"
           else
