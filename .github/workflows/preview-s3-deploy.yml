@@ -60,8 +60,9 @@ on:
         value: ${{ jobs.preview.outputs.preview-url }}
 
 # One concurrent run per PR per bucket — cancel in-progress deploys, keep teardowns.
-# Teardown (closed) must not cancel a sibling deploy if both trigger simultaneously,
-# but GitHub evaluates cancel-in-progress before the new run starts so this is safe.
+# cancel-in-progress applies to the whole per-PR group: a new push cancels a
+# stale deploy, and a close event cancels an in-flight deploy before tearing
+# down — both are the desired outcomes.
 concurrency:
   group: preview-${{ inputs.bucket-name }}-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -228,8 +229,12 @@ jobs:
           fi
           # Sync the build output into this PR's prefix. --delete only removes
           # objects within this PR's prefix (no cross-prefix deletion).
+          # Short, explicit cache policy: previews change on every push and
+          # must never be heuristically cached by browsers or held 24h by
+          # CloudFront's default TTL.
           aws s3 sync "${BUILD_OUTPUT_DIR}/" "s3://${BUCKET}/${PREFIX}/" \
             --delete \
+            --cache-control "public, max-age=60, must-revalidate" \
             2>&1 | tee /tmp/sync.log
           COUNT=$({ grep -E '^(upload|copy|delete):' /tmp/sync.log || true; } | wc -l | tr -d ' ')
           echo "objects-synced=${COUNT}" >> "$GITHUB_OUTPUT"
@@ -296,6 +301,7 @@ jobs:
       # TEARDOWN PATH (closed)
       # ------------------------------------------------------------------
       - name: Delete S3 prefix (teardown)
+        id: teardown
         if: github.event.action == 'closed' && steps.gate.outputs.has-credentials == 'true'
         shell: bash
         working-directory: '.'
@@ -376,10 +382,16 @@ jobs:
           BUCKET: ${{ inputs.bucket-name }}
           PREFIX: ${{ steps.coords.outputs.prefix }}
           PREVIEW_URL: ${{ steps.coords.outputs.preview-url }}
+          TEARDOWN_OUTCOME: ${{ steps.teardown.outcome }}
         run: |
           if [ "${ACTION}" = "closed" ]; then
-            echo "### Preview environment torn down" >> "$GITHUB_STEP_SUMMARY"
-            echo "- **Prefix removed:** \`s3://${BUCKET}/${PREFIX}/\`" >> "$GITHUB_STEP_SUMMARY"
+            if [ "${TEARDOWN_OUTCOME}" = "success" ]; then
+              echo "### Preview environment torn down" >> "$GITHUB_STEP_SUMMARY"
+              echo "- **Prefix removed:** \`s3://${BUCKET}/${PREFIX}/\`" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "### Preview teardown DID NOT COMPLETE (outcome: ${TEARDOWN_OUTCOME})" >> "$GITHUB_STEP_SUMMARY"
+              echo "- **Prefix may still exist:** \`s3://${BUCKET}/${PREFIX}/\` — re-run the job or delete manually." >> "$GITHUB_STEP_SUMMARY"
+            fi
           else
             echo "### Preview environment deployed" >> "$GITHUB_STEP_SUMMARY"
             echo "- **URL:** ${PREVIEW_URL}" >> "$GITHUB_STEP_SUMMARY"
