@@ -1,0 +1,93 @@
+# rollback.yml — consumer example
+#
+# Rollback model: redeploy the old ref; infrastructure stays put.
+# The cicd-toolkit workflows treat `checkout-ref` as the source of truth —
+# pointing it at a previous release tag checks out that commit's code, rebuilds
+# it, and redeploys to the same bucket / service. No state is rewound; only the
+# deployed artifact changes.
+#
+# For static sites, the whats-new-path injection step always pulls the LATEST
+# release's summary from GitHub Releases, so a rollback will bake the previous
+# release's whats-new.json (if that release's asset still exists) or skip
+# injection if the asset is absent — existing behavior, no special handling needed.
+#
+# Usage:
+#   gh workflow run rollback.yml -f tag=v1.2.3
+#
+# Adjust the `uses:` paths and inputs to match your repo's calling convention.
+
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to roll back to (e.g. v1.2.3)'
+        required: true
+        type: string
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Static site rollback — calls static-s3-deploy with the old tag checked out.
+  # ---------------------------------------------------------------------------
+  rollback-static:
+    name: Rollback static site to ${{ inputs.tag }}
+    uses: KotaHusky/cicd-toolkit/.github/workflows/static-s3-deploy.yml@main
+    with:
+      # Point checkout at the tag so the build reproduces the old artifact.
+      checkout-ref: ${{ inputs.tag }}
+
+      # Replace the placeholders below with your actual bucket and distribution.
+      bucket-name: my-app-static-bucket        # <-- your S3 bucket name
+      distribution-id: EXAMPLEXXXXX            # <-- your CloudFront distribution ID
+
+      # Optional: wire a GitHub environment for protection rules / scoped secrets.
+      # environment: production
+
+      # Optional: record a DORA deployment event (requires deployments: write below).
+      # track-deployment: true
+    secrets: inherit
+    # Uncomment when track-deployment is true:
+    # permissions:
+    #   id-token: write
+    #   contents: read
+    #   deployments: write
+
+  # ---------------------------------------------------------------------------
+  # ECS / container rollback — uncomment and adapt one of the variants below.
+  #
+  # Variant A: full end-to-end (image build → ECR mirror → ECS service → edge).
+  # Use this when rolling back a Next.js / SSR app deployed via ecs-express-app-deploy.
+  # ---------------------------------------------------------------------------
+  # rollback-ecs-app:
+  #   name: Rollback ECS app to ${{ inputs.tag }}
+  #   uses: KotaHusky/cicd-toolkit/.github/workflows/ecs-express-app-deploy.yml@main
+  #   with:
+  #     checkout-ref: ${{ inputs.tag }}      # rebuilds image from the tagged commit
+  #     app: my-app                          # <-- your app slug
+  #     stack-prefix: MyApp                  # <-- your CDK stack prefix
+  #     prod-domain: my-app.example.com      # <-- your prod domain
+  #     dev-domain: dev.my-app.example.com   # <-- your dev domain
+  #     prod-cert-arn: arn:aws:acm:us-east-1:000000000000:certificate/placeholder
+  #     dev-cert-arn: arn:aws:acm:us-east-1:000000000000:certificate/placeholder
+  #     aws-account-id: '000000000000'       # <-- your AWS account ID
+  #     # gh-environment: production         # optional GitHub environment gate
+  #     # track-deployment: true             # optional DORA tracking
+  #   secrets: inherit
+
+  # ---------------------------------------------------------------------------
+  # Variant B: ECS-only (pre-built ECR image already exists at the tag's SHA).
+  # Use when you have a separate build pipeline and only need to redeploy.
+  # ---------------------------------------------------------------------------
+  # rollback-ecs-service:
+  #   name: Rollback ECS service to ${{ inputs.tag }}
+  #   uses: KotaHusky/cicd-toolkit/.github/workflows/ecs-express-deploy.yml@main
+  #   with:
+  #     service-name: my-app                 # <-- your ECS service name
+  #     # Construct the ECR image URI from the tag's commit SHA.
+  #     # In practice, resolve the SHA outside this workflow and pass it in,
+  #     # or use a separate lookup step before calling this workflow.
+  #     image: '000000000000.dkr.ecr.us-east-1.amazonaws.com/my-app:${{ inputs.tag }}'
+  #     # environment: production            # optional GitHub environment gate
+  #     # track-deployment: true             # optional DORA tracking
+  #   secrets: inherit
