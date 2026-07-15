@@ -1,0 +1,252 @@
+name: Reusable Auto Version (conventional commits)
+
+# Computes the next semver from conventional commits since the last tag,
+# creates the tag, and runs the AI release pipeline for it — so merging to
+# the default branch is the whole release process. Conventional-commit
+# hygiene is the contract: enforce it with commitlint.yml.
+#
+# The tag is created with the workflow's GITHUB_TOKEN, whose events never
+# trigger other workflows — release.yml is invoked directly as a nested
+# reusable workflow instead of relying on a tag-push trigger, so no PAT is
+# needed. A manually pushed tag still releases via the tag-push caller and
+# is picked up as the new baseline here; the two paths cannot double-release.
+
+on:
+  workflow_call:
+    inputs:
+      initial-version:
+        description: 'Version for the first release when no semver tag exists yet (without the v prefix)'
+        required: false
+        type: string
+        default: '0.1.0'
+      dry-run:
+        description: 'Compute and report the bump, but do not tag or release'
+        required: false
+        type: boolean
+        default: false
+      floating-tags:
+        description: >-
+          Advance floating vN / vN.M tags to the new release. Useful for
+          repos consumed at a floating ref (actions, reusable workflows);
+          leave off for apps.
+        required: false
+        type: boolean
+        default: false
+      model:
+        description: 'Claude model for release notes (forwarded to release.yml)'
+        required: false
+        type: string
+        default: 'claude-haiku-4-5'
+      draft:
+        description: 'Create as draft release (forwarded to release.yml)'
+        required: false
+        type: boolean
+        default: false
+      app-context:
+        description: 'End-user-facing app description for the what''s-new summary (forwarded to release.yml)'
+        required: false
+        type: string
+        default: ''
+      whats-new:
+        description: 'Generate whats-new.json + releases.json (forwarded to release.yml)'
+        required: false
+        type: boolean
+        default: true
+      auto-publish:
+        description: 'Publish the what''s-new summary without human review (forwarded to release.yml)'
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      ANTHROPIC_API_KEY:
+        description: 'Anthropic API key (pay-per-token). Optional if CLAUDE_CODE_OAUTH_TOKEN is set.'
+        required: false
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: 'Claude Pro/Max OAuth token from `claude setup-token`. Preferred when set; billed to subscription.'
+        required: false
+    outputs:
+      tag:
+        description: 'The tag that was created and released (empty when nothing was releasable)'
+        value: ${{ jobs.version.outputs.tag }}
+      bump:
+        description: >-
+          The computed bump: major, minor, patch, none, or retry (an earlier
+          run tagged but failed to release; this run re-released that tag)
+        value: ${{ jobs.version.outputs.bump }}
+
+concurrency:
+  group: auto-version-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Compute version bump
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      bump: ${{ steps.bump.outputs.bump }}
+    steps:
+      - name: Compute bump from conventional commits
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          INITIAL: ${{ inputs.initial-version }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -euo pipefail
+
+          # Latest full-semver tag (floating vN / vN.M tags are ignored).
+          # The tags API needs no checkout and is constant-cost per tag.
+          LAST=$(gh api --paginate "repos/${REPO}/tags" --jq '.[].name' \
+            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)
+
+          # Self-heal an orphaned tag: if the last tag has no GitHub Release
+          # but the repo does release, a prior release run failed after
+          # tagging. Re-release that tag instead of computing a new bump —
+          # otherwise its commits would be skipped forever (the next compare
+          # starts from it). Commits since the orphan ship in the next
+          # releasable merge. Guarded on at least one existing Release so a
+          # repo adopting this workflow with plain unreleased git tags gets
+          # a normal bump, not a surprise release of its old tag. Skipped
+          # for draft releases, which the releases endpoints cannot see.
+          HAS_RELEASES=false
+          if gh api "repos/${REPO}/releases/latest" > /dev/null 2>&1; then
+            HAS_RELEASES=true
+          fi
+          if [ -n "$LAST" ] && [ "$HAS_RELEASES" = "true" ] && [ "${{ inputs.draft }}" != "true" ] \
+             && ! gh api "repos/${REPO}/releases/tags/${LAST}" > /dev/null 2>&1; then
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "bump=retry" >> "$GITHUB_OUTPUT"
+              echo "tag=" >> "$GITHUB_OUTPUT"
+              echo "::notice title=auto-version::Dry run — ${LAST} is tagged but unreleased; a real run would re-release it."
+              exit 0
+            fi
+            echo "bump=retry" >> "$GITHUB_OUTPUT"
+            echo "tag=${LAST}" >> "$GITHUB_OUTPUT"
+            echo "::warning title=auto-version::${LAST} is tagged but has no GitHub Release (most likely a prior release run failed after tagging) — re-releasing it. Commits merged since will ship in the next release."
+            exit 0
+          fi
+
+          # Non-merge commit messages in the release range: everything since
+          # the last tag, or (first release) the last 100 commits on the
+          # branch. The compare API returns at most 250 commits; warn rather
+          # than misversion.
+          if [ -z "$LAST" ]; then
+            RANGE=$(gh api "repos/${REPO}/commits?sha=${SHA}&per_page=100" \
+              --jq '[.[] | select(.parents | length == 1) | .commit.message]')
+          else
+            COMPARE=$(gh api "repos/${REPO}/compare/${LAST}...${SHA}")
+            TOTAL=$(echo "$COMPARE" | jq '.total_commits')
+            if [ "$TOTAL" -gt 250 ]; then
+              echo "::warning title=auto-version::${TOTAL} commits since ${LAST} but only 250 inspected — bump may be understated. Consider tagging manually."
+            fi
+            RANGE=$(echo "$COMPARE" \
+              | jq '[.commits[] | select(.parents | length == 1) | .commit.message]')
+          fi
+          MESSAGES=$(echo "$RANGE" | jq -r '.[]')
+          SUBJECTS=$(echo "$RANGE" | jq -r '.[] | split("\n")[0]')
+
+          BUMP="none"
+          # Breaking markers: a bang type (feat!:) in a subject, or a
+          # BREAKING CHANGE / BREAKING-CHANGE footer line — anchored so
+          # prose that merely mentions the phrase can't force a major.
+          if printf '%s' "$SUBJECTS" | grep -qE '^[a-z]+(\([^)]*\))?!:' \
+             || printf '%s' "$MESSAGES" | grep -qE '^BREAKING[ -]CHANGE:'; then
+            BUMP="major"
+          elif printf '%s' "$SUBJECTS" | grep -qE '^feat(\([^)]*\))?:'; then
+            BUMP="minor"
+          elif printf '%s' "$SUBJECTS" | grep -qE '^(fix|perf|revert)(\([^)]*\))?:'; then
+            BUMP="patch"
+          fi
+
+          if [ "$BUMP" = "none" ]; then
+            echo "bump=none" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "::notice title=auto-version::No feat/fix/perf/breaking commits ${LAST:+since ${LAST} }— nothing to release."
+            exit 0
+          fi
+
+          if [ -z "$LAST" ]; then
+            # First release: bootstrap at initial-version regardless of the
+            # bump size, but only once a releasable commit exists (above).
+            NEW="v${INITIAL}"
+            echo "No semver tag found — first release will be ${NEW} (${BUMP} commit present)."
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${LAST#v}"
+            case "$BUMP" in
+              major) NEW="v$((MAJOR + 1)).0.0" ;;
+              minor) NEW="v${MAJOR}.$((MINOR + 1)).0" ;;
+              patch) NEW="v${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+            esac
+            echo "Bump since ${LAST}: ${BUMP} → ${NEW}"
+          fi
+
+          echo "bump=${BUMP}" >> "$GITHUB_OUTPUT"
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "::notice title=auto-version::Dry run — would tag ${NEW} (${BUMP})."
+            exit 0
+          fi
+
+          gh api "repos/${REPO}/git/refs" -f ref="refs/tags/${NEW}" -f sha="${SHA}" > /dev/null
+          echo "tag=${NEW}" >> "$GITHUB_OUTPUT"
+          echo "Created tag ${NEW} at ${SHA}."
+
+  release:
+    name: Release
+    needs: version
+    if: needs.version.outputs.tag != ''
+    # Pinned to @main rather than a relative path: relative nested refs
+    # resolve against the CALLER's repository, which for consumers would
+    # look for release.yml in their own repo.
+    uses: KotaHusky/cicd-toolkit/.github/workflows/release.yml@main
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      model: ${{ inputs.model }}
+      draft: ${{ inputs.draft }}
+      app-context: ${{ inputs.app-context }}
+      whats-new: ${{ inputs.whats-new }}
+      auto-publish: ${{ inputs.auto-publish }}
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  float-tags:
+    name: Advance floating major/minor tags
+    needs: [version, release]
+    if: inputs.floating-tags && needs.version.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Shallow: only the released tag's commit is needed; it is fetched
+      # explicitly below. fetch-tags: true is fatal on tag-push events
+      # (actions/checkout#1467) and unnecessary here.
+      - uses: actions/checkout@v7
+
+      - name: Advance floating tags
+        shell: bash
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          # e.g. v2.5.4 → advance v2 and v2.5 to point at its commit.
+          # Anchored to the tag, not HEAD — on a retry release (orphaned
+          # tag healed by a later push) HEAD is newer than the release.
+          if [[ "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            MAJOR="v${BASH_REMATCH[1]}"
+            MINOR="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+            git fetch --depth=1 origin "refs/tags/${TAG}:refs/tags/${TAG}"
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -fa "$MAJOR" -m "Update floating tag $MAJOR → $TAG" "$TAG"
+            git tag -fa "$MINOR" -m "Update floating tag $MINOR → $TAG" "$TAG"
+            git push origin "$MAJOR" "$MINOR" --force
+            echo "Advanced $MAJOR and $MINOR to $TAG"
+          else
+            echo "Tag $TAG is not a full semver patch; skipping floating tags."
+          fi

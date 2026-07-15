@@ -200,6 +200,44 @@ The workflow compares commits between the current and previous semver tags, send
 
 **Auth:** when `CLAUDE_CODE_OAUTH_TOKEN` is set it is preferred — generation runs via [claude-code-action](https://github.com/anthropics/claude-code-action) on your subscription (requires the [Claude GitHub App](https://github.com/apps/claude); note the action skips if the caller workflow file differs from the repo's default branch, so tag from a commit whose workflows match `main`). Otherwise `ANTHROPIC_API_KEY` is used via direct API calls. One of the two is required.
 
+### Automatic Versioning
+
+**`auto-version.yml`** — Make merging to `main` the whole release process: computes the next semver from [conventional commits](https://www.conventionalcommits.org/) since the last tag, creates the tag, and runs `release.yml` for it. Pair with `commitlint.yml` so commit messages are trustworthy.
+
+```yaml
+on:
+  push:
+    branches: [main]
+
+jobs:
+  auto-version:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/auto-version.yml@main
+    permissions:
+      contents: write
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+Bump rules (matching semantic-release defaults): `feat!:`/`BREAKING CHANGE` → major, `feat:` → minor, `fix:`/`perf:`/`revert:` → patch; anything else (docs, chore, ci, refactor, …) releases nothing. Merge commits are ignored.
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `initial-version` | string | `0.1.0` | First release when no semver tag exists yet (fires only once a releasable commit is present — a `chore:`-only history releases nothing) |
+| `dry-run` | boolean | `false` | Report the computed bump without tagging or releasing |
+| `floating-tags` | boolean | `false` | Advance floating `vN` / `vN.M` tags after the release (for repos consumed at a floating ref; leave off for apps) |
+| `model` / `draft` / `app-context` / `whats-new` / `auto-publish` | — | — | Forwarded to `release.yml` (see above) |
+
+| Output | Description |
+|--------|-------------|
+| `tag` | The created tag, or empty when nothing was releasable |
+| `bump` | `major`, `minor`, `patch`, `none`, or `retry` (re-release of an orphaned tag) |
+
+The tag is created with the run's `GITHUB_TOKEN`, whose events don't trigger other workflows — `release.yml` is invoked directly as a nested workflow, so no PAT is needed and a tag-push release workflow can coexist without double-releasing. Manual `v*.*.*` tags keep working as an escape hatch and become the new baseline for the next auto bump.
+
+If a release run fails after tagging (leaving a tag with no GitHub Release), the next run — including a manual full re-run — detects the orphan and re-releases that tag instead of computing a new bump (`bump: retry`); commits merged in the meantime ship in the following release. The self-heal only fires in repos that already have at least one GitHub Release — adopting this workflow in a repo with plain unreleased git tags computes a normal bump from the latest tag rather than surprise-releasing it.
+
+> **Pinning caveat:** the nested `release.yml` call inside `auto-version.yml` is fixed at `@main` (GitHub can't parameterize `uses:`), so pinning `auto-version.yml` to a tag or SHA does **not** transitively pin the release pipeline. If you need a fully pinned release path, call `release.yml@<ref>` yourself from a tag-push workflow instead.
+
 ### End-User What's-New Summaries
 
 Releases are **two-tier**: the GitHub Release body stays engineer-focused and specific, while `release.yml` additionally generates a plain-language, end-user-facing summary your app can display — a `whats-new.json` (latest) and cumulative `releases.json` (last 20) attached to each release as assets. The artifact contract is versioned (`schemaVersion: 1`) and published at [`schemas/whats-new.schema.json`](schemas/whats-new.schema.json).

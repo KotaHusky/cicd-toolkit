@@ -1,0 +1,23 @@
+name: Auto Version
+
+# Every merge to main computes a semver bump from the conventional commits
+# and, when releasable (feat/fix/perf/breaking), tags + releases + advances
+# the floating v2 / v2.x tags. Manual `v*.*.*` tag pushes (self-release.yml)
+# remain as the escape hatch and become the new baseline here.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  auto-version:
+    uses: ./.github/workflows/auto-version.yml
+    with:
+      floating-tags: true
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

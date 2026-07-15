@@ -1,0 +1,36 @@
+# Automatic versioning + AI release on every merge to main.
+# Copy to .github/workflows/auto-version.yml in your repo.
+#
+# Computes the semver bump from conventional commits (feat → minor,
+# fix/perf → patch, breaking → major; anything else releases nothing),
+# creates the tag, and runs the AI release pipeline — release notes plus
+# the end-user whats-new.json assets. Pair with examples/ci.yml's
+# commitlint so commit messages are trustworthy.
+#
+# Alternative: keep examples/release.yml (manual tag push) if you want a
+# human to decide when releases happen. Both can coexist — a manual tag
+# releases via that path and becomes the baseline for the next auto bump.
+
+name: Auto Version
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  auto-version:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/auto-version.yml@main
+    with:
+      # Optional: end-user-facing app description for the what's-new summary.
+      # Better: maintain .github/whats-new-context.md (see examples/whats-new-context.md).
+      app-context: ''
+      # Uncomment to require human review of the public summary before publish:
+      # auto-publish: false
+    secrets:
+      # Preferred: Claude Pro/Max OAuth token (claude setup-token), billed to subscription.
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # Fallback: pay-per-token API key. Provide at least one of the two.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

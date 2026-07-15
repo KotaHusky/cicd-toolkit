@@ -35,8 +35,12 @@ any one consumer project:
 ## CDK Library & Releases
 - No barrel `lib/index.ts` — consumers deep-import from `lib/constructs/*` and
   `lib/stacks/*`. Don't add one.
-- Pushing a `v*` tag triggers `release.yml`, which calls the Anthropic API
-  (`ANTHROPIC_API_KEY` secret) to generate release notes. Only tag when cutting a release.
+- Releases are automatic: every merge to `main` runs `self-auto-version.yml`,
+  which computes the semver bump from the conventional commits (feat → minor,
+  fix/perf → patch, breaking → major; docs/chore/ci → no release), tags, and
+  runs the AI release pipeline. Commit types therefore decide versioning —
+  choose them deliberately. Manual `v*.*.*` tag pushes remain an escape hatch;
+  never tag manually unless intentionally cutting a release.
 
 ## Claude Tooling in This Repo
 - This repo hosts a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`
