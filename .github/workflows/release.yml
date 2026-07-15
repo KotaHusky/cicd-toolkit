@@ -117,15 +117,17 @@ jobs:
             | awk '{print $2}' | sed -e 's|^refs/tags/||' -e 's|\^{}$||' \
             | sort -u -V | grep -vx "${CURRENT_TAG}" | tail -n 1 || true)
 
+          echo "previous-tag=${PREVIOUS_TAG}" >> "$GITHUB_OUTPUT"
+
           if [ -n "$PREVIOUS_TAG" ]; then
             echo "Previous tag: ${PREVIOUS_TAG}"
             # Use GitHub API to compare tags (avoids needing full git history)
             COMMITS=$(gh api "repos/${{ github.repository }}/compare/${PREVIOUS_TAG}...${CURRENT_TAG}" \
-              --jq '[.commits[] | select(.parents | length == 1) | "- \(.commit.message | split("\n")[0]) (\(.sha[:7]))"] | join("\n")')
+              --jq '[.commits[] | select(.parents | length == 1) | "- `\(.commit.message | split("\n")[0] | gsub("`"; ""))` (\(.sha[:7]))"] | join("\n")')
           else
             echo "No previous tag found, using all commits up to tag"
             COMMITS=$(gh api "repos/${{ github.repository }}/commits?sha=${CURRENT_TAG}&per_page=100" \
-              --jq '[.[] | select(.parents | length == 1) | "- \(.commit.message | split("\n")[0]) (\(.sha[:7]))"] | join("\n")')
+              --jq '[.[] | select(.parents | length == 1) | "- `\(.commit.message | split("\n")[0] | gsub("`"; ""))` (\(.sha[:7]))"] | join("\n")')
           fi
 
           # Write to file to avoid shell escaping issues
@@ -230,12 +232,51 @@ jobs:
           fi
           TITLE=$(cat .release-work/title.txt)
           SUMMARY=$(cat .release-work/summary.txt)
-          CHANGELOG=$(cat /tmp/changelog.txt)
+          # The AI summary is composed from the commit log and can echo
+          # @handles or #123 tokens from it — code-span such tokens so they
+          # can't become live mentions/autolinks (same class as the
+          # changelog fix below). Existing backticks are stripped first so
+          # the inserted spans stay valid.
+          SUMMARY=$(printf '%s' "$SUMMARY" | tr -d '\140' \
+            | sed -E -e 's/(^|[^[:alnum:]])@([A-Za-z0-9][A-Za-z0-9-]*)/\1`@\2`/g' \
+                     -e 's/(^|[^[:alnum:]])#([0-9]+)/\1`#\2`/g')
 
           RELEASE_TITLE="${TAG} — ${TITLE}"
 
-          # Use printf to avoid YAML indentation leaking into the body
-          RELEASE_BODY=$(printf '%s\n\n## Changelog\n\n%s' "$SUMMARY" "$CHANGELOG")
+          # GitHub's generated notes provide the PR-level "What's Changed"
+          # list, the Full Changelog compare link, and contributor credit
+          # (the "by @author" attributions drive the release page's
+          # Contributors section). Fetched via the API rather than
+          # --generate-notes so the PR-title text can be sanitized: titles
+          # render verbatim and a title containing @user or #123 would
+          # mention/link just like commit subjects did. Backticks are
+          # stripped first so every title sits in a valid code span; the
+          # trailing "by @author in <url>" attribution is preserved.
+          # previous_tag_name pins the What's Changed range to the same
+          # PREVIOUS_TAG the AI summary was built from, so the two sections
+          # can't describe different commit ranges.
+          PREV_TAG="${{ steps.changelog.outputs.previous-tag }}"
+          GEN_NOTES=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            ${PREV_TAG:+-f previous_tag_name="$PREV_TAG"} \
+            --jq .body || true)
+          SAFE_NOTES=$(printf '%s\n' "$GEN_NOTES" | tr -d '\140' \
+            | sed -E 's|^\* (.+)( by @[A-Za-z0-9-]+(\[bot\])? in .+)$|* `\1`\2|')
+
+          # Use printf to avoid YAML indentation leaking into the body.
+          # The commit-level changelog stays in changelog.txt (feeding the
+          # AI notes and the artifact) but is not duplicated in the body —
+          # the generated What's Changed covers it at PR granularity.
+          # Fallback: generated notes itemize only merged PRs, and still
+          # return a Full Changelog compare link when the range has zero
+          # PRs (direct-push repos) — so trigger on "no itemized lines",
+          # not on emptiness, and keep whatever GitHub did return (the
+          # compare link) after the commit-level changelog.
+          if ! printf '%s\n' "$SAFE_NOTES" | grep -qE '^\* '; then
+            echo "::notice title=release::Generated notes contain no PR entries — including the commit-level changelog."
+            SAFE_NOTES=$(printf '## Changelog\n\n%s\n\n%s' "$(cat /tmp/changelog.txt)" "$SAFE_NOTES")
+          fi
+          RELEASE_BODY=$(printf '%s\n\n%s' "$SUMMARY" "$SAFE_NOTES")
 
           DRAFT_FLAG=""
           if [ "${{ inputs.draft }}" = "true" ]; then
