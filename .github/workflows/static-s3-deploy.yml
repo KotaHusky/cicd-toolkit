@@ -51,6 +51,16 @@ on:
         required: false
         type: boolean
         default: true
+      sync-exclude:
+        description: >-
+          Glob excluded from the sync in both directions. Defaults to
+          'previews/*' — the prefix reserved by preview-s3-deploy.yml — so
+          production deploys never delete live PR previews. Set to '' if your
+          site legitimately ships a previews/ path (which also means you
+          can't host PR previews on this bucket).
+        required: false
+        type: string
+        default: 'previews/*'
       cache-control-immutable:
         description: 'Glob (relative to build-output-dir) whose objects get long-cache headers. Empty disables.'
         required: false
@@ -131,11 +141,17 @@ jobs:
         with:
           ref: ${{ inputs.checkout-ref || github.ref }}
 
+      # corepack must run before setup-node: its pnpm cache resolution
+      # shells out to `pnpm store path`, which needs the corepack shim.
+      - name: Enable corepack (pnpm)
+        if: inputs.package-manager == 'pnpm'
+        shell: bash
+        run: corepack enable
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
-          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+          cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.package-manager == 'pnpm' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
       - name: Install dependencies
         shell: bash
@@ -206,6 +222,8 @@ jobs:
       - name: Sync build output to S3
         id: sync
         shell: bash
+        env:
+          SYNC_EXCLUDE: ${{ inputs.sync-exclude }}
         run: |
           DELETE_FLAG=""
           if [ "${{ inputs.sync-delete }}" = "true" ]; then
@@ -213,8 +231,20 @@ jobs:
           fi
 
           # Default short cache for everything (HTML, etc.)
+          # sync-exclude (default previews/*) keeps production deploys from
+          # deleting live PR previews; the exclusion filters BOTH directions,
+          # so warn loudly if the build output itself contains the prefix.
+          EXCLUDE_ARGS=()
+          if [ -n "${SYNC_EXCLUDE}" ]; then
+            EXCLUDE_ARGS=(--exclude "${SYNC_EXCLUDE}")
+            LOCAL_DIR="${SYNC_EXCLUDE%%/*}"
+            if [ -e "${{ inputs.build-output-dir }}/${LOCAL_DIR}" ]; then
+              echo "::warning title=sync-exclude::Build output contains '${LOCAL_DIR}/', which matches sync-exclude ('${SYNC_EXCLUDE}') and will NOT be uploaded. Set sync-exclude: '' if this path is part of your site (that bucket then can't host PR previews)."
+            fi
+          fi
           aws s3 sync "${{ inputs.build-output-dir }}/" "s3://${{ inputs.bucket-name }}/" \
             $DELETE_FLAG \
+            "${EXCLUDE_ARGS[@]}" \
             --cache-control "public, max-age=60, must-revalidate" \
             | tee /tmp/sync.log
 

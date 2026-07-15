@@ -29,6 +29,28 @@ export interface StaticSiteStackProps extends cdk.StackProps {
   /** Optional additional aliases (e.g. ['www.example.org']). Ignored when
    *  `domainName` is unset. */
   additionalAliases?: string[];
+  /**
+   * Attach a CloudFront Function (viewer-request) that rewrites directory
+   * URIs to their index.html equivalents. Required when serving sub-path
+   * deployments (e.g. PR preview environments at /previews/pr-42/) because
+   * S3 REST origins do not honour S3's website-hosting directory index docs.
+   *
+   * Rewrite rules applied in order:
+   *  1. URI ends with `/`  →  append `index.html`
+   *  2. Last path segment has no `.`  →  append `/index.html`
+   *     (handles bare paths like /about or /previews/pr-42/dashboard)
+   *
+   * Defaults to `false`.
+   *
+   * **Interaction with `spaFallback`:** Both props can be enabled together,
+   * but note the limitation: spaFallback's custom error responses always
+   * serve the ROOT `/index.html` (they are distribution-wide, not per-path),
+   * so a missing client-side route inside a preview subpath falls back to
+   * the PRODUCTION app, not the preview's index. Previews of SPAs with
+   * client-side routing should be exercised via their entry URL (or use
+   * hash routing); deep links into a preview 404-fall-back to production.
+   */
+  previewIndexRewrite?: boolean;
 }
 
 /**
@@ -84,12 +106,50 @@ export class StaticSiteStack extends cdk.Stack {
       });
     }
 
+    // Attach an index-rewrite CloudFront Function when opted in.
+    // The function runs at the viewer-request event and normalises directory
+    // URIs so that S3 REST origins (which ignore S3 website index docs)
+    // serve index.html for bare directory paths.
+    let indexRewriteFunction: cloudfront.FunctionAssociation[] | undefined;
+    if (props.previewIndexRewrite) {
+      const rewriteFn = new cloudfront.Function(this, 'IndexRewriteFn', {
+        code: cloudfront.FunctionCode.fromInline(
+          // Kept to ES5-style var/concat for maximum runtime compatibility,
+          // though the JS_2_0 runtime below would allow modern syntax.
+          [
+            'function handler(event) {',
+            '  var uri = event.request.uri;',
+            // Scoped to the preview prefix so production paths are never
+            // rewritten (e.g. an extensionless /about must keep hitting the
+            // origin as-is for sites that emit about.html + redirects).
+            '  if (uri.indexOf("/previews/") !== 0) { return event.request; }',
+            '  if (uri.slice(-1) === "/") {',
+            '    event.request.uri = uri + "index.html";',
+            '  } else if (uri.lastIndexOf(".") <= uri.lastIndexOf("/")) {',
+            '    event.request.uri = uri + "/index.html";',
+            '  }',
+            '  return event.request;',
+            '}',
+          ].join('\n'),
+        ),
+        runtime: cloudfront.FunctionRuntime.JS_2_0,
+        comment: 'Rewrite directory URIs to index.html for S3 REST origin sub-path deployments',
+      });
+      indexRewriteFunction = [
+        {
+          function: rewriteFn,
+          eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+        },
+      ];
+    }
+
     const defaultBehavior: cloudfront.BehaviorOptions = {
       origin: origins.S3BucketOrigin.withOriginAccessControl(this.bucket),
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
       compress: true,
       allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+      ...(indexRewriteFunction ? { functionAssociations: indexRewriteFunction } : {}),
     };
 
     const errorResponses: cloudfront.ErrorResponse[] = props.spaFallback

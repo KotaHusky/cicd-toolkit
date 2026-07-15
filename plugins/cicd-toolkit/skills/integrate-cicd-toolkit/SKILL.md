@@ -32,6 +32,7 @@ Adapt the example rather than authoring a caller from scratch.
 | Build + push Docker image to GHCR | `docker-ghcr.yml` (opt-in provenance attestations via `attest: true`) |
 | Deploy AWS CDK app (OIDC auth) | `cdk-deploy.yml` (synth-only check: `cdk-synth.yml`, which includes a report-only checkov policy scan by default) |
 | Static site (Next.js/Astro/Vite) → S3 + CloudFront | `static-s3-deploy.yml` |
+| Per-PR preview environments for static sites | `preview-s3-deploy.yml` — needs `pull-requests: write`, a base-path-aware build (`PREVIEW_BASE_PATH`), and `previewIndexRewrite: true` on StaticSiteStack. See `examples/preview-env.yml` |
 | Node/Express app → ECS Fargate | `ecs-express-deploy.yml` / `ecs-express-app-deploy.yml` |
 | Automatic versioning + AI release on every merge to main (recommended) | `auto-version.yml` — computes the semver bump from conventional commits (no checkout, pure API), tags, and runs `release.yml`; pair with `commitlint.yml`. Caller needs `contents: write` |
 | GitHub Release with AI-generated notes on manual `v*` tag | `release.yml` |
