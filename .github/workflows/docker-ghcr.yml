@@ -54,6 +54,15 @@ on:
         required: false
         type: string
         default: ''
+      attest:
+        description: >-
+          Generate and push a SLSA build-provenance attestation for the pushed
+          image. Requires the calling workflow to grant
+          `id-token: write` and `attestations: write` permissions. Only takes
+          effect when `push` is also true. Default: false.
+        required: false
+        type: boolean
+        default: false
     outputs:
       tags:
         description: 'Generated image tags'
@@ -158,3 +167,20 @@ jobs:
             node_auth_token=${{ secrets.node-auth-token }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Derive image name for attestation
+        id: attest-name
+        if: inputs.attest && inputs.push
+        env:
+          IMAGE_NAME: ${{ inputs.image-name || format('ghcr.io/{0}', github.repository) }}
+        run: |
+          set -euo pipefail
+          echo "name=${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        if: inputs.attest && inputs.push
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ steps.attest-name.outputs.name }}
+          subject-digest: ${{ steps.build-push.outputs.digest }}
+          push-to-registry: true
