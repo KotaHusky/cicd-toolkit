@@ -205,7 +205,7 @@ See the workflow file for the full list (`pre-build-filter`, `concurrency`, `run
 |--------|----------|-------------|
 | `role-arn` | yes | ARN of the IAM role to assume via OIDC |
 
-**PR check:** `cdk-synth.yml` is the synth-only companion — it runs `cdk synth` with no AWS credentials or secrets, so use it as the pull-request gate to catch template errors before merge (inputs: `node-version`, `pre-build-filter`, `cdk-context`, all optional). See [`examples/cdk-deploy.yml`](examples/cdk-deploy.yml) for the paired PR-synth + main-deploy layout.
+**PR check:** `cdk-synth.yml` is the synth-only companion — it runs `cdk synth` with no AWS credentials or secrets, so use it as the pull-request gate to catch template errors before merge (inputs: `node-version`, `pre-build-filter`, `cdk-context`, all optional). If your CDK app depends on private `@kotahusky/*` packages from GitHub Packages, pass `node-auth-token: ${{ secrets.GITHUB_TOKEN }}` (or a PAT with `read:packages`) and add an `.npmrc` in your repo routing the scope: `@kotahusky:registry=https://npm.pkg.github.com`. See [`examples/cdk-deploy.yml`](examples/cdk-deploy.yml) for the paired PR-synth + main-deploy layout.
 
 **Policy scan:** `cdk-synth.yml` also runs a [checkov](https://www.checkov.io/) policy scan over the synthesized CloudFormation (`policy-scan`, default `true`). Report-only by default (`policy-soft-fail: true`) — findings land in the job summary and a `policy-scan-results` artifact without failing the check; set `policy-soft-fail: false` to enforce.
 
@@ -808,8 +808,8 @@ CloudWatch dashboard (ALB + ECS service metrics) and the tiered alarm set used b
 Self-contained L3 construct (the first resident of `packages/`, with its own build, tests, and prebuilt Lambda assets): gates Cognito user-pool signups behind single-use invite codes. A pre-signup Lambda atomically claims codes via conditional DynamoDB writes; admins generate/list/revoke through an SSM Automation runbook, with layered IAM (human → automation role → Lambda → table).
 
 ```ts
-// Build the package first: cd packages/invite-gating && npm ci && npm run build
-import { InviteGating } from '@cicd-toolkit/invite-gating';
+// npm i @kotahusky/cognito-invite-gating  (requires .npmrc auth for npm.pkg.github.com)
+import { InviteGating } from '@kotahusky/cognito-invite-gating';
 
 new InviteGating(this, 'InviteGating', {
   userPool,                    // attaches the pre-signup trigger

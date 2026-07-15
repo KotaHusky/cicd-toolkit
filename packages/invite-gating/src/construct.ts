@@ -48,7 +48,7 @@ export class InviteGating extends Construct {
     // __dirname is the CommonJS global pointing to the compiled output dir (dist/).
     // Pre-built ZIPs live at <package-root>/assets/, i.e. one level up from dist/.
     const bundleAsset = (lambdaDir: string): lambda.AssetCode => {
-      if (process.env.NODE_ENV === 'test') {
+      if (process.env.CICD_TOOLKIT_STUB_ASSETS === '1') {
         const stubDir = `/tmp/cdk-stub-${lambdaDir}`;
         mkdirSync(stubDir, { recursive: true });
         writeFileSync(path.join(stubDir, 'handler.js'), 'exports.handler = async () => {};');
