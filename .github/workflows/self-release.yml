@@ -23,11 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Shallow: HEAD is the tagged commit, which is all the floating tags
+      # need to point at. fetch-tags: true is fatal on tag-push events
+      # (actions/checkout#1467).
       - uses: actions/checkout@v7
-        with:
-          # fetch-tags: true with a shallow fetch is fatal on tag-push events
-          # (actions/checkout#1467); full depth fetches all tags safely.
-          fetch-depth: 0
 
       - name: Advance floating tags
         shell: bash
