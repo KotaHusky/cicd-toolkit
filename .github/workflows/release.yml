@@ -155,7 +155,7 @@ jobs:
             describing what changed, written for engineers.
           Do not modify any other file.
           PROMPT
-          npx --yes @anthropic-ai/claude-code@latest -p "$(cat /tmp/notes-prompt.txt)" \
+          npx --yes @anthropic-ai/claude-code@2 -p "$(cat /tmp/notes-prompt.txt)" \
             --allowedTools "Read,Write" --max-turns 6 --model "${MODEL}"
           test -s .release-work/title.txt && test -s .release-work/summary.txt \
             || { echo "::error title=release::Claude did not produce title.txt/summary.txt"; exit 1; }
@@ -379,7 +379,7 @@ jobs:
 
             Do not modify any other file.
           PROMPT
-          npx --yes @anthropic-ai/claude-code@latest -p "$(cat /tmp/whats-new-prompt.txt)" \
+          npx --yes @anthropic-ai/claude-code@2 -p "$(cat /tmp/whats-new-prompt.txt)" \
             --allowedTools "Read,Write,Task" --max-turns 8 --model "${MODEL}"
 
       - name: Generate and sanitize public summary (API key)
