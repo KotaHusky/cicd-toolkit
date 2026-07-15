@@ -39,7 +39,11 @@ export interface SharedEdgeStackProps extends cdk.StackProps {
  * function with the apex domain hardcoded — that is correct and not a quota risk
  * even at 50 alias-using apps.
  *
- * ### Bootstrap once per account (us-east-1 required for CloudFront)
+ * ### Bootstrap once per account
+ * Deploy in the SAME region as the consuming app stacks: the SSM parameters
+ * are regional, so app stacks resolve them only from their own region. (The
+ * CloudFront policies themselves are global and can be managed from any
+ * region; us-east-1 below just matches where the edge stacks live for ACM.)
  * ```ts
  * new SharedEdgeStack(app, 'SharedEdge', { env: { account: '111111111111', region: 'us-east-1' } });
  * ```
