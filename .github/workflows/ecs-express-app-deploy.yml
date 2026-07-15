@@ -184,10 +184,16 @@ jobs:
         with:
           role-to-assume: ${{ secrets.role-arn }}
           aws-region: ${{ inputs.aws-region }}
+      # The image job (docker-ghcr.yml) pushes ghcr.io/{repository},
+      # lowercased — derive the same ref instead of hardcoding an owner or
+      # assuming the app slug matches the repo name.
+      - id: src
+        shell: bash
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
       - id: mirror
         uses: KotaHusky/cicd-toolkit/actions/ecr-mirror@v2
         with:
-          source-image: ghcr.io/kotahusky/${{ inputs.app }}@${{ needs.image.outputs.digest }}
+          source-image: ${{ steps.src.outputs.image }}@${{ needs.image.outputs.digest }}
           ecr-repo: ${{ inputs.app }}
           ecr-tag: ${{ github.sha }}
           aws-region: ${{ inputs.aws-region }}
