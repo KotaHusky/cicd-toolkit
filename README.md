@@ -105,20 +105,28 @@ jobs:
     uses: KotaHusky/cicd-toolkit/.github/workflows/cdk-deploy.yml@main
     with:
       aws-region: 'us-east-1'
-      node-version: '24'
+      cdk-context: 'env=prod projectName=my-app'
     secrets:
       role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
 ```
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
+| `cdk-context` | string | — | Space-separated `key=value` context pairs passed as `-c` flags (required) |
 | `aws-region` | string | `us-east-1` | AWS region |
 | `node-version` | string | `24` | Node.js version |
-| `working-directory` | string | `.` | Working directory |
+| `stacks` | string | `--all` | Stacks to deploy |
+| `stack-prefix` | string | `''` | Stack name prefix; enables stuck-CloudFormation-stack recovery |
+| `method` | string | `change-set` | Deploy method: `change-set` (safe) or `direct` (faster, no rollback) |
+| `hotswap` | string | `off` | `off`, `fallback` (try hotswap, fall back to CFN), or `force` |
+
+See the workflow file for the full list (`pre-build-filter`, `concurrency`, `run-diff`, `recover-stacks`, `checkout-ref`).
 
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `role-arn` | yes | ARN of the IAM role to assume via OIDC |
+
+**PR check:** `cdk-synth.yml` is the synth-only companion — it runs `cdk synth` with no AWS credentials or secrets, so use it as the pull-request gate to catch template errors before merge (inputs: `node-version`, `pre-build-filter`, `cdk-context`, all optional). See [`examples/cdk-deploy.yml`](examples/cdk-deploy.yml) for the paired PR-synth + main-deploy layout.
 
 ### Static Site Deploy (S3 + CloudFront)
 
@@ -160,6 +168,162 @@ jobs:
 |--------|-------------|
 | `invalidation-id` | CloudFront invalidation ID |
 | `objects-uploaded` | Count of objects synced (parsed from CLI output) |
+
+### ECS Express Deploy
+
+**`ecs-express-app-deploy.yml`** — End-to-end deploy of a containerized app to ECS Express Mode behind CloudFront: builds the image to GHCR, mirrors it to ECR, deploys the Express service, then deploys a CloudFront edge stack from the caller's `infra/` CDK app (a thin `bin/app.ts` instantiating `EcsExpressEdgeStack`). The environment derives from the caller's trigger: `push` → prod, `pull_request` → dev (gated on a `deploy:dev` PR label), `workflow_dispatch` → the `environment` input. DNS is on Cloudflare — after the first deploy, add a CNAME from the domain to the distribution domain.
+
+```yaml
+jobs:
+  deploy:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/ecs-express-app-deploy.yml@main
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    with:
+      app: my-app                    # GHCR image name + ECR repo + prod service name
+      stack-prefix: MyApp            # CDK stacks: MyAppProd / MyAppDev
+      prod-domain: app.example.com
+      dev-domain: dev.app.example.com
+      prod-cert-arn: arn:aws:acm:us-east-1:123456789012:certificate/aaaa-bbbb
+      dev-cert-arn: arn:aws:acm:us-east-1:123456789012:certificate/cccc-dddd
+      aws-account-id: '123456789012'
+    secrets:
+      role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+      execution-role-arn: ${{ secrets.ECS_EXECUTION_ROLE_ARN }}
+      infrastructure-role-arn: ${{ secrets.ECS_INFRASTRUCTURE_ROLE_ARN }}
+```
+
+Key inputs (see the workflow file for the full list):
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `app` | string | — | App slug: GHCR image name + ECR repo + prod service name (required) |
+| `stack-prefix` | string | — | CDK stack id prefix; stacks are `<prefix>Prod` / `<prefix>Dev` (required) |
+| `prod-domain` / `dev-domain` | string | — | Domains per environment (required) |
+| `prod-cert-arn` / `dev-cert-arn` | string | — | us-east-1 ACM cert ARNs per domain (required) |
+| `aws-account-id` | string | — | Target AWS account (required) |
+| `aws-region` | string | `us-east-1` | AWS region |
+| `container-port` | number | `3000` | Container port that receives traffic |
+| `cpu` / `memory` | string | `256` / `512` | Fargate sizing (floor values; raise for heavier apps) |
+| `health-check-path` | string | `/api/health` | ALB health-check path |
+| `prod-bake-minutes` | string | `0` | Prod canary bake; `0` promotes as soon as healthy. Dev is always `0` |
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `role-arn` | yes | IAM role for AWS authentication via OIDC |
+| `execution-role-arn` | yes | ECS task execution role (pulls image, writes logs) |
+| `infrastructure-role-arn` | yes | ECS infrastructure role (manages ALB/target groups/SGs) |
+| `node-auth-token` | no | PAT (`read:packages`) for private npm deps during the image build |
+
+**`ecs-express-deploy.yml`** — the lower-level building block: points an ECS Express service at an existing container image (creating the service on first deploy) and manages canary bake time, auto-scaling, and health checks. Use it directly when you bring your own image and edge/infra pipeline — see [`examples/ecs-express.yml`](examples/ecs-express.yml). Takes the same three role-ARN secrets as above (`node-auth-token` not needed).
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `service-name` | string | — | ECS Express service name (required) |
+| `image` | string | — | Full container image URI (required) |
+| `aws-region` | string | `us-east-1` | AWS region |
+| `cluster` | string | `''` | ECS cluster (Express Mode creates one if omitted) |
+| `container-port` | number | `80` | Container port that receives traffic |
+| `cpu` / `memory` | string | `512` / `1024` | Fargate sizing |
+| `bake-time-minutes` | string | `''` | Canary bake (mins); `0` promotes as soon as healthy, empty keeps the service default |
+| `health-check-path` | string | `/` | ALB health-check path |
+| `min-task-count` / `max-task-count` | number | `1` / `3` | Auto-scaling floor / ceiling |
+
+…plus env vars, container secrets, command, networking (subnets/security groups), task role, and tags — see the workflow file.
+
+| Output | Description |
+|--------|-------------|
+| `service-arn` | ARN of the deployed Express service |
+| `endpoint` | Public endpoint URL (ALB DNS name) |
+
+### Azure Container Apps
+
+**`aca-provision.yml`** + **`aca-deploy.yml`** — Provision Container Apps infrastructure from a Bicep template (Day-2 updates; the very first bootstrap runs locally, see [`examples/aca.yml`](examples/aca.yml)), then deploy a container image to the app. Both authenticate via Azure OIDC federated credentials — grant the calling workflow `id-token: write`.
+
+```yaml
+jobs:
+  provision:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/aca-provision.yml@main
+    with:
+      resource-group: my-app-rg
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  deploy:
+    needs: provision
+    uses: KotaHusky/cicd-toolkit/.github/workflows/aca-deploy.yml@main
+    with:
+      resource-group: my-app-rg
+      container-app-name: my-app
+      image: ghcr.io/<owner>/my-app:latest
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+```
+
+`aca-provision.yml` inputs:
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `resource-group` | string | — | Azure resource group name (required; created if missing) |
+| `location` | string | `eastus` | Azure region |
+| `bicep-file` | string | `infra/main.bicep` | Path to the Bicep template in the calling repo |
+
+`aca-deploy.yml` inputs (see the workflow file for the full list):
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `resource-group` | string | — | Azure resource group name (required) |
+| `container-app-name` | string | — | Container App name (required) |
+| `image` | string | — | Full container image URI (required) |
+| `target-port` | number | `3000` | Container listening port |
+| `ingress` | string | `external` | `external` or `internal` |
+| `container-app-environment` | string | `''` | Container App environment name (auto-created if missing) |
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `AZURE_CLIENT_ID` | yes | Entra ID app registration with a federated credential for the repo |
+| `AZURE_TENANT_ID` | yes | Azure tenant |
+| `AZURE_SUBSCRIPTION_ID` | yes | Azure subscription |
+| `REGISTRY_TOKEN` | no | Registry password/token (deploy only; required if `registry-url` is set) |
+
+| Output | Description |
+|--------|-------------|
+| `fqdn` | Deployed app FQDN (deploy only) |
+
+### Cloudflare DNS
+
+**`cloudflare-dns.yml`** — Create or update a DNS record via the Cloudflare API (upsert by name + type), with an optional full cache purge. Typical use: a post-deploy step pointing a CNAME at a CloudFront distribution domain or a Container Apps FQDN.
+
+```yaml
+jobs:
+  dns:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/cloudflare-dns.yml@main
+    with:
+      record-name: app.example.com
+      record-content: d1234567abcdef.cloudfront.net
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `record-name` | string | — | DNS record name, e.g. `app.example.com` (required) |
+| `record-content` | string | — | Record content: IP address or hostname (required) |
+| `record-type` | string | `CNAME` | `A`, `AAAA`, or `CNAME` |
+| `proxied` | boolean | `true` | Cloudflare proxy (orange cloud) |
+| `purge-cache` | boolean | `false` | Purge the whole zone cache after the update |
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `CLOUDFLARE_API_TOKEN` | yes | Token with Zone.DNS edit (plus Zone.Cache Purge if `purge-cache`) |
+| `CLOUDFLARE_ZONE_ID` | yes | Zone ID from the zone's Overview page |
 
 ### AI-Powered Release
 
@@ -233,6 +397,8 @@ Bump rules (matching semantic-release defaults): `feat!:`/`BREAKING CHANGE` → 
 | `bump` | `major`, `minor`, `patch`, or `none` |
 
 The tag is created with the run's `GITHUB_TOKEN`, whose events don't trigger other workflows — `release.yml` is invoked directly as a nested workflow, so no PAT is needed and a tag-push release workflow can coexist without double-releasing. Manual `v*.*.*` tags keep working as an escape hatch and become the new baseline for the next auto bump.
+
+**Tag-only variant:** `semver-tag.yml` is the lower-level workflow: it computes the conventional-commit bump and creates the `vX.Y.Z` tag (needs `contents: write`) but chains to **no** release — the caller wires downstream jobs off its outputs (`new-version`, `new-tag`, `bumped`, `changelog`) itself, as in [`examples/ecs-express.yml`](examples/ecs-express.yml). Its `default-bump` input (default `false` = no bump) can force a bump when no conventional commit calls for one. Prefer `auto-version.yml` unless you're composing the pipeline yourself.
 
 ### End-User What's-New Summaries
 
@@ -434,9 +600,17 @@ new StaticSiteDashboard(stack, 'SiteMetrics', {
 
 See [`examples/`](examples/) for ready-to-copy workflow files:
 
+- [`aca.yml`](examples/aca.yml) — Azure Container Apps: Bicep provision + image deploy via Azure OIDC
+- [`auto-version.yml`](examples/auto-version.yml) — Automatic versioning + AI release on every merge to main
+- [`cdk-deploy.yml`](examples/cdk-deploy.yml) — CDK synth check on PRs, OIDC deploy on merge to main
 - [`ci.yml`](examples/ci.yml) — Build verification + Docker push + commitlint
+- [`claude-review.yml`](examples/claude-review.yml) — Claude PR review (inline comments + sticky summary)
+- [`cloudflare-dns.yml`](examples/cloudflare-dns.yml) — Upsert a Cloudflare DNS record, optional cache purge
+- [`docker-ghcr.yml`](examples/docker-ghcr.yml) — Build a Docker image and push it to GHCR
+- [`ecs-express.yml`](examples/ecs-express.yml) — Tag-driven release for a containerized app on ECS Express Mode
 - [`release.yml`](examples/release.yml) — AI-powered release on tag push
 - [`static-site.yml`](examples/static-site.yml) — Tag-driven release for an S3+CloudFront static site
+- [`whats-new-context.md`](examples/whats-new-context.md) — Living context doc powering the end-user what's-new summaries
 
 ## Claude Code plugin
 
