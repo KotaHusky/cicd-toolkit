@@ -138,7 +138,7 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
-          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+          cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.package-manager == 'pnpm' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
       - name: Install dependencies
         if: github.event.action != 'closed'
@@ -183,11 +183,13 @@ jobs:
           role-to-assume: ${{ secrets.role-arn }}
           aws-region: ${{ inputs.aws-region }}
 
+      # Inherits the job's working-directory so build-output-dir resolves
+      # relative to it (matching static-s3-deploy) — monorepo callers set
+      # working-directory: apps/web and the output lands at apps/web/out.
       - name: Sync to S3
         if: github.event.action != 'closed'
         id: sync
         shell: bash
-        working-directory: '.'
         env:
           BUCKET: ${{ inputs.bucket-name }}
           PREFIX: ${{ steps.coords.outputs.prefix }}
