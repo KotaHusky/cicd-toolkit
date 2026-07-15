@@ -1,0 +1,45 @@
+# Example: AWS CDK pipeline — synth-only check on PRs, real deploy on merge.
+# Copy to .github/workflows/cdk-deploy.yml in your repo.
+#
+# Flow:
+#   pull_request  -> cdk-synth   (dry run, no AWS credentials, catches template errors)
+#   push to main  -> cdk-deploy  (OIDC auth, cdk diff + deploy)
+#
+# Prerequisite: bootstrap GitHub -> AWS OIDC once (see the README's
+# "OIDC Bootstrap" section) and store the role ARN as AWS_DEPLOY_ROLE_ARN.
+
+name: CDK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # PR gate: synth the app without touching AWS.
+  synth:
+    if: github.event_name == 'pull_request'
+    uses: KotaHusky/cicd-toolkit/.github/workflows/cdk-synth.yml@main
+    with:
+      cdk-context: 'env=dev projectName=my-app'
+      # pre-build-filter: '@my-org/shared'   # Turbo filter for packages to build first
+
+  # Merge gate: diff + deploy via OIDC.
+  deploy:
+    if: github.event_name == 'push'
+    uses: KotaHusky/cicd-toolkit/.github/workflows/cdk-deploy.yml@main
+    permissions:
+      id-token: write   # OIDC to AWS
+      contents: read
+    with:
+      aws-region: 'us-east-1'
+      # Required: space-separated key=value pairs passed to cdk as -c flags.
+      cdk-context: 'env=prod projectName=my-app'
+      # stacks: 'MyAppStack'     # default deploys --all
+      # stack-prefix: 'MyApp'    # enables stuck-CloudFormation-stack recovery
+      # method: 'change-set'     # or 'direct' (faster, no automatic rollback)
+      # hotswap: 'off'           # 'fallback' or 'force' for fast dev loops
+      # run-diff: true           # cdk diff before deploy
+    secrets:
+      role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}

@@ -1,0 +1,58 @@
+# Example: Azure Container Apps — provision infra (Bicep), then deploy an image.
+# Copy to .github/workflows/aca.yml in your repo.
+#
+# Auth is OIDC via azure/login: create an Entra ID app registration with a
+# federated credential for this repo, then set the AZURE_CLIENT_ID /
+# AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID secrets.
+#
+# aca-provision.yml is for Day-2 infra updates. The very first bootstrap
+# (before the secrets exist) runs locally:
+#   az group create -n my-app-rg -l eastus
+#   az deployment group create -g my-app-rg -f infra/main.bicep
+
+name: Azure Container Apps
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write   # OIDC login to Azure
+  contents: read
+
+jobs:
+  # Apply the Bicep template from this repo (creates the resource group if needed).
+  provision:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/aca-provision.yml@main
+    with:
+      resource-group: my-app-rg
+      # location: eastus
+      # bicep-file: infra/main.bicep
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  # Point the Container App at a new image (see examples/docker-ghcr.yml for
+  # building one). Outputs the deployed FQDN.
+  deploy:
+    needs: provision
+    uses: KotaHusky/cicd-toolkit/.github/workflows/aca-deploy.yml@main
+    with:
+      resource-group: my-app-rg
+      container-app-name: my-app
+      # GHCR references must be lowercase — hardcode the lowercased path
+      # (github.repository preserves casing, e.g. My-Org/My-App would fail).
+      image: ghcr.io/my-org/my-app:latest
+      target-port: 3000
+      # ingress: external
+      # container-app-environment: my-app-env   # auto-created if missing
+      # environment-variables: 'NODE_ENV=production LOG_LEVEL=info'
+      # For a private registry, set both and pass REGISTRY_TOKEN below:
+      # registry-url: ghcr.io
+      # registry-username: my-github-username
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      # REGISTRY_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}  # required if registry-url is set

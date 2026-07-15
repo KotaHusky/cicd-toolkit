@@ -1,0 +1,37 @@
+# Example: build a Docker image and push it to GitHub Container Registry.
+# Copy to .github/workflows/docker-ghcr.yml in your repo.
+#
+# Pushes ghcr.io/<owner>/<repo> tagged with the branch, the commit SHA, and
+# `latest` on the default branch. Pass `version` to add vX.Y.Z / vX.Y / vX
+# tags — see examples/ecs-express.yml for wiring that to semver-tag.
+
+name: Docker GHCR
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write   # push to ghcr.io
+
+jobs:
+  docker:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/docker-ghcr.yml@main
+    permissions:
+      contents: read
+      packages: write
+    with:
+      platforms: 'linux/amd64'
+      # image-name: ghcr.io/<owner>/my-app     # defaults to ghcr.io/<owner>/<repo>
+      # dockerfile: './Dockerfile'
+      # context: '.'
+      # push: true
+      # version: '1.2.3'                       # adds v1.2.3, v1.2, v1 tags
+      # provenance: 'mode=max'                 # SLSA provenance attestation ('false' to disable)
+      # whats-new-path: public/whats-new.json  # bake the release summary into the image
+      # build-args: |
+      #   NODE_ENV=production
+    # Only needed when the image build installs private GitHub Packages (npm) deps:
+    # secrets:
+    #   node-auth-token: ${{ secrets.GH_PACKAGES_TOKEN }}

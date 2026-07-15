@@ -1,0 +1,29 @@
+# Example: create or update a Cloudflare DNS record (upsert by name + type).
+# Copy to .github/workflows/cloudflare-dns.yml in your repo, or add the job
+# to an existing deploy workflow.
+#
+# Typical use: a post-deploy step pointing a CNAME at a CloudFront
+# distribution domain or an Azure Container Apps FQDN.
+#
+# Secrets:
+#   CLOUDFLARE_API_TOKEN — needs Zone.DNS edit (plus Zone.Cache Purge if you
+#                          enable purge-cache)
+#   CLOUDFLARE_ZONE_ID   — shown on the zone's Overview page
+
+name: Cloudflare DNS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dns:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/cloudflare-dns.yml@main
+    with:
+      record-name: app.example.com
+      record-type: CNAME                              # A, AAAA, or CNAME
+      record-content: d1234567abcdef.cloudfront.net   # IP address or hostname
+      proxied: true                                   # Cloudflare proxy (orange cloud)
+      # purge-cache: true                             # purge everything after the update
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
