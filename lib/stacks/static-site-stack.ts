@@ -42,14 +42,13 @@ export interface StaticSiteStackProps extends cdk.StackProps {
    *
    * Defaults to `false`.
    *
-   * **Interaction with `spaFallback`:** Both props can be enabled together.
-   * The CloudFront Function rewrites the viewer request *before* CloudFront
-   * forwards to the origin, so the SPA error-response rules (which fire on
-   * 403/404 *from the origin*) remain fully effective for any path that is
-   * genuinely missing. Precedence: index-rewrite runs first (viewer-request
-   * event); spaFallback's custom error responses run after the origin
-   * responds. Enable `spaFallback` as well when the app uses client-side
-   * routing inside the preview path.
+   * **Interaction with `spaFallback`:** Both props can be enabled together,
+   * but note the limitation: spaFallback's custom error responses always
+   * serve the ROOT `/index.html` (they are distribution-wide, not per-path),
+   * so a missing client-side route inside a preview subpath falls back to
+   * the PRODUCTION app, not the preview's index. Previews of SPAs with
+   * client-side routing should be exercised via their entry URL (or use
+   * hash routing); deep links into a preview 404-fall-back to production.
    */
   previewIndexRewrite?: boolean;
 }
@@ -115,8 +114,8 @@ export class StaticSiteStack extends cdk.Stack {
     if (props.previewIndexRewrite) {
       const rewriteFn = new cloudfront.Function(this, 'IndexRewriteFn', {
         code: cloudfront.FunctionCode.fromInline(
-          // CloudFront Functions runtime: ECMAScript 5.1 strict subset.
-          // No template literals, no const/let — use var and string concat.
+          // Kept to ES5-style var/concat for maximum runtime compatibility,
+          // though the JS_2_0 runtime below would allow modern syntax.
           [
             'function handler(event) {',
             '  var uri = event.request.uri;',
