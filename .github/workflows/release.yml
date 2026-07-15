@@ -230,26 +230,37 @@ jobs:
           fi
           TITLE=$(cat .release-work/title.txt)
           SUMMARY=$(cat .release-work/summary.txt)
-          CHANGELOG=$(cat /tmp/changelog.txt)
 
           RELEASE_TITLE="${TAG} — ${TITLE}"
 
-          # Use printf to avoid YAML indentation leaking into the body
-          RELEASE_BODY=$(printf '%s\n\n## Changelog\n\n%s' "$SUMMARY" "$CHANGELOG")
+          # GitHub's generated notes provide the PR-level "What's Changed"
+          # list, the Full Changelog compare link, and contributor credit
+          # (the "by @author" attributions drive the release page's
+          # Contributors section). Fetched via the API rather than
+          # --generate-notes so the PR-title text can be sanitized: titles
+          # render verbatim and a title containing @user or #123 would
+          # mention/link just like commit subjects did. Backticks are
+          # stripped first so every title sits in a valid code span; the
+          # trailing "by @author in <url>" attribution is preserved.
+          GEN_NOTES=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="$TAG" --jq .body || true)
+          SAFE_NOTES=$(printf '%s\n' "$GEN_NOTES" | tr -d '\140' \
+            | sed -E 's|^\* (.+)( by @[A-Za-z0-9-]+ in .+)$|* `\1`\2|')
+
+          # Use printf to avoid YAML indentation leaking into the body.
+          # The commit-level changelog stays in changelog.txt (feeding the
+          # AI notes and the artifact) but is not duplicated in the body —
+          # the generated What's Changed covers it at PR granularity.
+          RELEASE_BODY=$(printf '%s\n\n%s' "$SUMMARY" "$SAFE_NOTES")
 
           DRAFT_FLAG=""
           if [ "${{ inputs.draft }}" = "true" ]; then
             DRAFT_FLAG="--draft"
           fi
 
-          # --generate-notes appends GitHub's computed "What's Changed" +
-          # Contributors footer (derived from merged PRs between the tags) —
-          # authoritative contributor credit that text in commit messages
-          # cannot spoof, unlike @-mentions in the body.
           RELEASE_URL=$(gh release create "$TAG" \
             --title "$RELEASE_TITLE" \
             --notes "$RELEASE_BODY" \
-            --generate-notes \
             --verify-tag \
             $DRAFT_FLAG)
 
