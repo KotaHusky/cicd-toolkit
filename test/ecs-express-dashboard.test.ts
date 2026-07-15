@@ -15,7 +15,7 @@ function makeDashboard(overrides: Partial<ConstructorParameters<typeof EcsExpres
   });
   new EcsExpressDashboard(stack, 'Metrics', {
     distribution,
-    serviceName: 'homepage',
+    serviceName: 'example-app',
     ...overrides,
   });
   return Template.fromStack(stack);
@@ -39,7 +39,7 @@ describe('EcsExpressDashboard', () => {
 
   test('adds ALB widgets when loadBalancerFullName is supplied', () => {
     const body = JSON.stringify(
-      makeDashboard({ loadBalancerFullName: 'app/homepage-alb/abc123' }).toJSON(),
+      makeDashboard({ loadBalancerFullName: 'app/example-app-alb/abc123' }).toJSON(),
     );
     expect(body).toContain('AWS/ApplicationELB');
     expect(body).toContain('TargetResponseTime');
@@ -48,13 +48,13 @@ describe('EcsExpressDashboard', () => {
 
   test('adds host-health widget only when targetGroupFullName is supplied', () => {
     const without = JSON.stringify(
-      makeDashboard({ loadBalancerFullName: 'app/homepage-alb/abc123' }).toJSON(),
+      makeDashboard({ loadBalancerFullName: 'app/example-app-alb/abc123' }).toJSON(),
     );
     expect(without).not.toContain('HealthyHostCount');
     const withTg = JSON.stringify(
       makeDashboard({
-        loadBalancerFullName: 'app/homepage-alb/abc123',
-        targetGroupFullName: 'targetgroup/homepage-tg/def456',
+        loadBalancerFullName: 'app/example-app-alb/abc123',
+        targetGroupFullName: 'targetgroup/example-app-tg/def456',
       }).toJSON(),
     );
     expect(withTg).toContain('HealthyHostCount');
@@ -62,7 +62,7 @@ describe('EcsExpressDashboard', () => {
 
   test('adds ECS compute widgets when cluster + service are supplied', () => {
     const body = JSON.stringify(
-      makeDashboard({ ecsClusterName: 'homepage-cluster', ecsServiceName: 'homepage' }).toJSON(),
+      makeDashboard({ ecsClusterName: 'example-app-cluster', ecsServiceName: 'example-app' }).toJSON(),
     );
     expect(body).toContain('AWS/ECS');
     expect(body).toContain('CPUUtilization');
@@ -72,7 +72,7 @@ describe('EcsExpressDashboard', () => {
   test('uses serviceName for the dashboard name by default', () => {
     const template = makeDashboard();
     template.hasResourceProperties('AWS::CloudWatch::Dashboard', {
-      DashboardName: 'homepage-ecs-express',
+      DashboardName: 'example-app-ecs-express',
     });
   });
 });

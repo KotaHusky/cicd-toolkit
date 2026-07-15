@@ -18,7 +18,7 @@ on:
   workflow_call:
     inputs:
       app:
-        description: 'App slug = GHCR image name + ECR repo + prod service name (e.g. homepage)'
+        description: 'App slug = GHCR image name + ECR repo + prod service name (e.g. my-app)'
         required: true
         type: string
       stack-prefix:
@@ -75,7 +75,7 @@ on:
         type: string
         default: '0'
       prod-additional-aliases:
-        description: 'Extra prod domains served by the same distribution (comma-separated, e.g. www.kota.dog). They are 301-redirected to the primary domain. Require coverage by prod-cert-arn (SAN). Prod only.'
+        description: 'Extra prod domains served by the same distribution (comma-separated, e.g. www.example.com). They are 301-redirected to the primary domain. Require coverage by prod-cert-arn (SAN). Prod only.'
         required: false
         type: string
         default: ''
