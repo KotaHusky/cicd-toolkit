@@ -259,7 +259,7 @@ jobs:
           > Built from commit \`${SHORT_SHA}\`. Torn down automatically when the PR closes."
 
           # Find an existing comment with the sentinel marker.
-          EXISTING_ID=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+          EXISTING_ID=$(gh api --paginate "repos/${REPO}/issues/${PR_NUMBER}/comments" \
             --jq '.[] | select(.body | startswith("<!-- preview-env -->")) | .id' \
             | head -n1 || true)
 
@@ -331,7 +331,7 @@ jobs:
 
           _The URL \`${PREVIEW_URL}\` is no longer active._"
 
-          EXISTING_ID=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+          EXISTING_ID=$(gh api --paginate "repos/${REPO}/issues/${PR_NUMBER}/comments" \
             --jq '.[] | select(.body | startswith("<!-- preview-env -->")) | .id' \
             | head -n1 || true)
 

@@ -119,6 +119,10 @@ export class StaticSiteStack extends cdk.Stack {
           [
             'function handler(event) {',
             '  var uri = event.request.uri;',
+            // Scoped to the preview prefix so production paths are never
+            // rewritten (e.g. an extensionless /about must keep hitting the
+            // origin as-is for sites that emit about.html + redirects).
+            '  if (uri.indexOf("/previews/") !== 0) { return event.request; }',
             '  if (uri.slice(-1) === "/") {',
             '    event.request.uri = uri + "index.html";',
             '  } else if (uri.lastIndexOf(".") <= uri.lastIndexOf("/")) {',
