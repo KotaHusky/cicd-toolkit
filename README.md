@@ -341,7 +341,7 @@ jobs:
 
 ### Environments, Promotion & Rollback
 
-All AWS deploy workflows (`cdk-deploy.yml`, `static-s3-deploy.yml`, `ecs-express-deploy.yml`, `ecs-express-app-deploy.yml`) accept two additional inputs:
+All AWS deploy workflows (`cdk-deploy.yml`, `static-s3-deploy.yml`, `ecs-express-deploy.yml`, `ecs-express-app-deploy.yml`) accept two additional inputs (on `ecs-express-app-deploy.yml` the GitHub Environment input is named **`gh-environment`**, because its pre-existing `environment` input selects the dev|prod runtime env):
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
