@@ -77,6 +77,12 @@ jobs:
           # NOTE: Dependabot does not update pip install versions in shell steps —
           # bump this pin manually when upgrading checkov.
           pip install --quiet --user "checkov==3.3.8"
+          # pip --user installs to ~/.local/bin, which is not reliably on
+          # PATH on hosted runners; a missing binary must fail loud (a
+          # silent miss would report "clean" without ever scanning).
+          export PATH="${HOME}/.local/bin:${PATH}"
+          command -v checkov > /dev/null \
+            || { echo "::error title=policy-scan::checkov not found after install"; exit 1; }
 
           # Build soft-fail flag: checkov --soft-fail causes exit 0 regardless of
           # findings, which is exactly what policy-soft-fail: true needs.

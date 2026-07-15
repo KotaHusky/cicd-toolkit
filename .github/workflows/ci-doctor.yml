@@ -63,7 +63,7 @@ jobs:
             --label "ci-doctor" \
             --state open \
             --json number,title \
-            --jq '[.[] | select(.title | contains(env.WORKFLOW_NAME))] | .[].number')
+            --jq '[.[] | select(.title == ("CI doctor: " + env.WORKFLOW_NAME + " failing on main"))] | .[].number')
 
           if [ -z "${ISSUE_NUMBERS}" ]; then
             echo "No open ci-doctor issues found for workflow '${WORKFLOW_NAME}' — nothing to close."
@@ -180,6 +180,8 @@ jobs:
         if: steps.auth.outputs.mode == 'api-key'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MODEL: ${{ inputs.model }}
+          WORKFLOW_NAME: ${{ inputs.workflow-name }}
         run: |
           set -euo pipefail
 
@@ -187,7 +189,7 @@ jobs:
             local prompt_file="$1"
             local request
             request=$(jq -n \
-              --arg model "${{ inputs.model }}" \
+              --arg model "${MODEL}" \
               --rawfile prompt "$prompt_file" \
               '{model: $model, max_tokens: 1024, messages: [{role: "user", content: $prompt}]}')
             local response http_code body
@@ -208,7 +210,7 @@ jobs:
           }
 
           LOG_CONTENT=$(cat .ci-doctor/logs.txt)
-          WFNAME="${{ inputs.workflow-name }}"
+          WFNAME="${WORKFLOW_NAME}"
 
           cat > /tmp/diagnosis-prompt.txt <<PROMPT
           The following are the failed-job logs from a GitHub Actions workflow
@@ -292,7 +294,7 @@ jobs:
             --label "ci-doctor" \
             --state open \
             --json number,title \
-            --jq '[.[] | select(.title | contains(env.WORKFLOW_NAME))] | .[0].number // ""')
+            --jq '[.[] | select(.title == ("CI doctor: " + env.WORKFLOW_NAME + " failing on main"))] | .[0].number // ""')
 
           if [ -n "${EXISTING}" ]; then
             echo "Updating existing issue #${EXISTING} with new diagnosis."
