@@ -13,6 +13,7 @@
 export { EcsExpressEdgeStack, EcsExpressEdgeStackProps } from './lib/stacks/ecs-express-edge-stack';
 export { StaticSiteStack, StaticSiteStackProps } from './lib/stacks/static-site-stack';
 export { OidcBootstrapStack, OidcBootstrapStackProps, RepoRole } from './lib/stacks/oidc-bootstrap-stack';
+export { SharedEdgeStack, SharedEdgeStackProps } from './lib/stacks/shared-edge-stack';
 export { applyTags } from './lib/constructs/standard-tags';
 export { StaticSiteDashboard, StaticSiteDashboardProps } from './lib/constructs/static-site-dashboard';
 export { EcsExpressDashboard, EcsExpressDashboardProps } from './lib/constructs/ecs-express-dashboard';

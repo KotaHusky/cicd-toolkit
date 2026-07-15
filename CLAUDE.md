@@ -33,8 +33,9 @@ any one consumer project:
   and the matching file in `examples/`.
 
 ## CDK Library & Releases
-- No barrel `lib/index.ts` — consumers deep-import from `lib/constructs/*` and
-  `lib/stacks/*`. Don't add one.
+- The library entry point is the ROOT `index.ts` barrel (consumers
+  `import { X } from 'cicd-toolkit'` via a git dep) — new public stacks and
+  constructs must be exported there. There is deliberately no `lib/index.ts`.
 - Releases are automatic: every merge to `main` runs `self-auto-version.yml`,
   which computes the semver bump from the conventional commits (feat → minor,
   fix/perf → patch, breaking → major; docs/chore/ci → no release), tags, and

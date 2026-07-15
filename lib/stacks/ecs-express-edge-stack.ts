@@ -2,12 +2,14 @@ import * as cdk from 'aws-cdk-lib';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import {
   EcsExpressObservability,
   ObservabilityProps,
   resolveObservability,
 } from '../constructs/ecs-express-observability';
+import { SHARED_EDGE_SSM_KEYS, normalizeSsmPrefix } from './shared-edge-stack';
 
 export interface EcsExpressEdgeStackProps extends cdk.StackProps {
   /**
@@ -56,6 +58,31 @@ export interface EcsExpressEdgeStackProps extends cdk.StackProps {
   ecsClusterName?: string;
   /** ECS service name for compute widgets + alarms. */
   ecsServiceName?: string;
+
+  // --- Shared account-level edge primitives (opt-in) -----------------------
+  /**
+   * When set, the stack resolves the shared CloudFront **cache policy** and
+   * **response-headers policy** from SSM rather than creating per-stack resources.
+   * This sidesteps the AWS per-account quota of ~20 cache policies and ~20
+   * response-headers policies (~10 apps × dev/prod hits the wall without sharing).
+   * Deploy {@link SharedEdgeStack} once per account and pass this prop to every
+   * app stack that runs in that account.
+   *
+   * The www→apex redirect CloudFront Function is always created per-stack
+   * regardless of this prop (functions have a ~100/account quota, not ~20).
+   *
+   * The `ssmPrefix` must match the `ssmPrefix` used when deploying
+   * `SharedEdgeStack` (default: `'/cicd-toolkit/edge'`).
+   *
+   * Omit this prop entirely to retain the original per-stack behavior.
+   */
+  sharedEdge?: {
+    /**
+     * SSM prefix where `SharedEdgeStack` published its primitives.
+     * @default '/cicd-toolkit/edge'
+     */
+    ssmPrefix?: string;
+  };
 }
 
 /**
@@ -119,6 +146,11 @@ export class EcsExpressEdgeStack extends cdk.Stack {
     // Redirect any non-primary alias (e.g. www.example.com) to the primary domain
     // with a 301 — at the edge, before the origin (so it works even though the
     // origin request policy strips Host).
+    //
+    // CloudFront Functions have a ~100/account quota (vs ~20 for policies), so a
+    // per-stack function with the apex hardcoded is safe even at 50 alias-using apps.
+    // The two account-capped resources (CachePolicy, ResponseHeadersPolicy) are what
+    // SharedEdgeStack shares; functions stay per-stack in all modes.
     let fnAssoc: cloudfront.FunctionAssociation[] | undefined;
     if (props.domainName && (props.additionalAliases?.length ?? 0) > 0) {
       const apex = JSON.stringify(props.domainName);
@@ -147,20 +179,32 @@ export class EcsExpressEdgeStack extends cdk.Stack {
     // visible. The SSR origin (Next.js) emits a long `stale-while-revalidate`,
     // which makes browsers serve the previous page while refreshing in the
     // background; override the header at the edge so clients always revalidate.
-    const ssrCacheControl = new cloudfront.ResponseHeadersPolicy(this, 'SsrCacheControl', {
-      customHeadersBehavior: {
-        customHeaders: [
-          { header: 'cache-control', value: 'no-cache, must-revalidate', override: true },
-        ],
-      },
-    });
+    //
+    // In shared mode, resolve the response-headers policy from SSM rather than
+    // creating a new per-stack AWS::CloudFront::ResponseHeadersPolicy resource.
+    const ssrResponseHeadersPolicy: cloudfront.IResponseHeadersPolicy = props.sharedEdge
+      ? cloudfront.ResponseHeadersPolicy.fromResponseHeadersPolicyId(
+          this,
+          'SsrCacheControl',
+          ssm.StringParameter.valueForStringParameter(
+            this,
+            `${normalizeSsmPrefix(props.sharedEdge.ssmPrefix ?? '/cicd-toolkit/edge')}/${SHARED_EDGE_SSM_KEYS.ssrResponseHeadersPolicyId}`,
+          ),
+        )
+      : new cloudfront.ResponseHeadersPolicy(this, 'SsrCacheControl', {
+          customHeadersBehavior: {
+            customHeaders: [
+              { header: 'cache-control', value: 'no-cache, must-revalidate', override: true },
+            ],
+          },
+        });
 
     const ssrBehavior: cloudfront.BehaviorOptions = {
       origin,
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
       cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-      responseHeadersPolicy: ssrCacheControl,
+      responseHeadersPolicy: ssrResponseHeadersPolicy,
       originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
       functionAssociations: fnAssoc,
       compress: true,
@@ -179,17 +223,29 @@ export class EcsExpressEdgeStack extends cdk.Stack {
     // Next.js image optimizer: /_next/image?url=...&w=...&q=... — the query
     // string carries the params, so it must be forwarded AND keyed in the cache
     // (CACHING_OPTIMIZED drops query strings, which makes the optimizer 400).
-    const imageCachePolicy = new cloudfront.CachePolicy(this, 'NextImageCache', {
-      comment: 'Next.js image optimizer (url/w/q + Accept)',
-      queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
-      headerBehavior: cloudfront.CacheHeaderBehavior.allowList('Accept'),
-      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
-      enableAcceptEncodingGzip: true,
-      enableAcceptEncodingBrotli: true,
-      defaultTtl: cdk.Duration.days(7),
-      minTtl: cdk.Duration.seconds(0),
-      maxTtl: cdk.Duration.days(365),
-    });
+    //
+    // In shared mode, resolve the cache policy from SSM rather than creating a
+    // new per-stack AWS::CloudFront::CachePolicy resource.
+    const imageCachePolicy: cloudfront.ICachePolicy = props.sharedEdge
+      ? cloudfront.CachePolicy.fromCachePolicyId(
+          this,
+          'NextImageCache',
+          ssm.StringParameter.valueForStringParameter(
+            this,
+            `${normalizeSsmPrefix(props.sharedEdge.ssmPrefix ?? '/cicd-toolkit/edge')}/${SHARED_EDGE_SSM_KEYS.nextImageCachePolicyId}`,
+          ),
+        )
+      : new cloudfront.CachePolicy(this, 'NextImageCache', {
+          comment: 'Next.js image optimizer (url/w/q + Accept)',
+          queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
+          headerBehavior: cloudfront.CacheHeaderBehavior.allowList('Accept'),
+          cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+          enableAcceptEncodingGzip: true,
+          enableAcceptEncodingBrotli: true,
+          defaultTtl: cdk.Duration.days(7),
+          minTtl: cdk.Duration.seconds(0),
+          maxTtl: cdk.Duration.days(365),
+        });
     const imageBehavior: cloudfront.BehaviorOptions = {
       origin,
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,

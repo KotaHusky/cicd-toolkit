@@ -68,6 +68,7 @@ to integrate all of it themselves.
   - [`StaticSiteStack` (S3 + CloudFront, optional ACM + Route 53)](#staticsitestack-s3--cloudfront-optional-acm--route-53)
   - [`applyTags(scope, tags)`](#applytagsscope-tags)
   - [`StaticSiteDashboard`](#staticsitedashboard)
+  - [SharedEdgeStack (account-level CloudFront primitives)](#sharededgestack-account-level-cloudfront-primitives)
   - [`EcsExpressEdgeStack` (CloudFront in front of ECS Express)](#ecsexpressedgestack-cloudfront-in-front-of-ecs-express)
   - [`OidcBootstrapStack` (GitHub → AWS OIDC provider + deploy roles)](#oidcbootstrapstack-github--aws-oidc-provider--deploy-roles)
   - [`EcsExpressDashboard` / `ecs-express-observability`](#ecsexpressdashboard--ecs-express-observability)
@@ -740,6 +741,24 @@ new StaticSiteDashboard(stack, 'SiteMetrics', {
   dashboardName: 'kiosk-static-site',
 });
 ```
+
+### `SharedEdgeStack` (account-level CloudFront primitives)
+
+CloudFront cache and response-headers policies are account-scoped and capped (~20 each by default) — at two per app stack, the wall arrives around 10 apps. `SharedEdgeStack` creates `EcsExpressEdgeStack`'s two capped primitives (Next-image cache policy, SSR response-headers policy) **once per account** and publishes their IDs to SSM under `ssmPrefix` (default `/cicd-toolkit/edge`); app stacks opt in with `sharedEdge` and create zero of their own. The www→apex redirect stays a per-stack CloudFront Function (functions cap at ~100/account, and viewer-request functions can't read per-distribution origin headers, so a shared one can't know the apex):
+
+```ts
+// once per account (e.g. in your bootstrap app)
+new SharedEdgeStack(app, 'SharedEdge', { env });
+
+// each app stack
+new EcsExpressEdgeStack(app, 'MyAppEdge', {
+  env,
+  // ...existing props...
+  sharedEdge: {},            // or { ssmPrefix: '/custom/prefix' }
+});
+```
+
+Result: 1 of each policy account-wide instead of two per app — the policy quota stops being the ceiling (~200 apps; per-stack redirect functions become the next wall around ~50 alias-using apps). Omitting `sharedEdge` keeps the original per-stack behavior, fully backward compatible.
 
 ### `EcsExpressEdgeStack` (CloudFront in front of ECS Express)
 
