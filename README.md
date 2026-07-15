@@ -393,7 +393,7 @@ Bump rules (matching semantic-release defaults): `feat!:`/`BREAKING CHANGE` → 
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `initial-version` | string | `0.1.0` | First release when no semver tag exists yet |
+| `initial-version` | string | `0.1.0` | First release when no semver tag exists yet (fires only once a releasable commit is present — a `chore:`-only history releases nothing) |
 | `dry-run` | boolean | `false` | Report the computed bump without tagging or releasing |
 | `floating-tags` | boolean | `false` | Advance floating `vN` / `vN.M` tags after the release (for repos consumed at a floating ref; leave off for apps) |
 | `model` / `draft` / `app-context` / `whats-new` / `auto-publish` | — | — | Forwarded to `release.yml` (see above) |
@@ -401,11 +401,11 @@ Bump rules (matching semantic-release defaults): `feat!:`/`BREAKING CHANGE` → 
 | Output | Description |
 |--------|-------------|
 | `tag` | The created tag, or empty when nothing was releasable |
-| `bump` | `major`, `minor`, `patch`, or `none` |
+| `bump` | `major`, `minor`, `patch`, `none`, or `retry` (re-release of an orphaned tag) |
 
 The tag is created with the run's `GITHUB_TOKEN`, whose events don't trigger other workflows — `release.yml` is invoked directly as a nested workflow, so no PAT is needed and a tag-push release workflow can coexist without double-releasing. Manual `v*.*.*` tags keep working as an escape hatch and become the new baseline for the next auto bump.
 
-If a release run fails after tagging (leaving a tag with no GitHub Release), the next run — including a manual full re-run — detects the orphan and re-releases that tag instead of computing a new bump (`bump: retry`); commits merged in the meantime ship in the following release.
+If a release run fails after tagging (leaving a tag with no GitHub Release), the next run — including a manual full re-run — detects the orphan and re-releases that tag instead of computing a new bump (`bump: retry`); commits merged in the meantime ship in the following release. The self-heal only fires in repos that already have at least one GitHub Release — adopting this workflow in a repo with plain unreleased git tags computes a normal bump from the latest tag rather than surprise-releasing it.
 
 > **Pinning caveat:** the nested `release.yml` call inside `auto-version.yml` is fixed at `@main` (GitHub can't parameterize `uses:`), so pinning `auto-version.yml` to a tag or SHA does **not** transitively pin the release pipeline. If you need a fully pinned release path, call `release.yml@<ref>` yourself from a tag-push workflow instead.
 
@@ -542,6 +542,8 @@ npx cdk deploy --app "npx ts-node bin/bootstrap.ts"
 ```
 
 This creates an IAM OIDC Provider for `token.actions.githubusercontent.com` and an IAM Role trusted by your GitHub org/repo. Store the role ARN as `AWS_DEPLOY_ROLE_ARN` in your repo secrets.
+
+Every role the stack creates automatically gets `sts:AssumeRole` on the `cdk-*` bootstrap roles and account-scoped `cloudformation:ListStacks` (ListStacks doesn't support resource-level permissions — scoping it to stack ARNs silently denies it and CDK's rollback-detection pre-check logs `AccessDenied` on every deploy). Roles that deploy with `cdk deploy --method=direct` should also set `directDeployResourceOps: true` to get the Cloud Control API resource actions that mode requires.
 
 ## CDK constructs
 

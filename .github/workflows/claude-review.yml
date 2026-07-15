@@ -164,6 +164,8 @@ jobs:
           # --paginate + --slurp walks all pages, so >100 threads can't
           # silently false-pass the gate. gh rejects --slurp combined with
           # --jq, so the response is parsed with standalone jq below.
+          # stderr is captured separately so a benign warning from a
+          # successful call can't poison the jq parse and fail the gate.
           RAW=$(gh api graphql --paginate --slurp \
               -f owner="${{ github.repository_owner }}" \
               -f repo="${{ github.event.repository.name }}" \
@@ -177,24 +179,25 @@ jobs:
                     }
                   }
                 }
-              }' 2>&1)
+              }' 2>/tmp/threads-err.txt)
           STATUS=$?
           if [ "$STATUS" -eq 0 ]; then
-            THREADS=$(printf '%s' "$RAW" | jq '[.[].data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length' 2>&1)
+            THREADS=$(printf '%s' "$RAW" | jq '[.[].data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length' 2>>/tmp/threads-err.txt)
             STATUS=$?
           fi
-          THREADS=${THREADS:-$RAW}
           set -e
           if [ "$STATUS" -ne 0 ]; then
+            ERR=$(cat /tmp/threads-err.txt 2>/dev/null || true)
             # Fail open ONLY on permission errors (restricted token); fail
             # closed on anything else (5xx, rate limit) so a consumer who
             # requires this check never gets false assurance — re-run fixes
-            # transient failures.
-            if echo "$THREADS" | grep -qiE 'resource not accessible|forbidden|permission'; then
+            # transient failures. GraphQL-level errors can land on either
+            # stream, so both are checked.
+            if printf '%s\n%s' "$ERR" "$RAW" | grep -qiE 'resource not accessible|forbidden|permission'; then
               echo "::notice title=Review threads::Token lacks permission to read review threads — skipping the gate. Grant the calling job pull-requests: read (or write) to enable it."
               exit 0
             fi
-            echo "::error title=Review threads::Could not query review threads (transient error?) — re-run this job. Output: ${THREADS}"
+            echo "::error title=Review threads::Could not query review threads (transient error?) — re-run this job. Error: ${ERR:-$RAW}"
             exit 1
           fi
           if [ "$THREADS" -gt 0 ]; then

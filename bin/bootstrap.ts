@@ -70,6 +70,9 @@ new OidcBootstrapStack(app, 'OidcBootstrapStack', {
       repo: 'kinky-connections-app',
       branch: '*',
       roleName: 'KinkyConnections-GitHubDeploy',
+      // Codifies the live GitHubDeployDirectResourceOps inline policy so a
+      // re-bootstrap doesn't silently drop it (this repo deploys --method=direct).
+      directDeployResourceOps: true,
       policies: [
         new iam.PolicyStatement({
           actions: ['cloudformation:*'],

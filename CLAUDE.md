@@ -5,6 +5,21 @@ Reusable GitHub Actions workflows (`.github/workflows/`, all `workflow_call`),
 composite actions (`actions/*/action.yml`), and AWS CDK constructs/stacks (`lib/`)
 consumed by other repos. `examples/` holds copy-paste caller workflows for consumers.
 
+## Reusable-Asset Policy (MANDATORY)
+This repo is an opinionated, reusable asset. Nothing in it may be specific to
+any one consumer project:
+- No consumer repo/app names, account-specific ARNs, role names, or
+  org-specific configuration — in code, workflows, tests, examples, docs,
+  skills, or PR/issue framing.
+- Examples and test fixtures use generic names (`my-app`, `example-app`,
+  `123456789012`).
+- Per-account/per-app configuration (e.g. an OIDC role manifest) belongs in
+  the consumer's own repo; this repo ships only the reusable constructs,
+  workflows, and defaults.
+- When a consumer hits a bug or gap, generalize the lesson before landing it
+  here — encode it as an opinionated default or a construct/workflow option,
+  never as a consumer-specific special case.
+
 ## Working on Workflows & Actions
 - Workflows cannot be run locally. Consumers reference this repo at `@main`, so
   merging to `main` ships to all consumers immediately. Test from a consumer repo

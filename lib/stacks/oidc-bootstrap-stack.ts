@@ -3,18 +3,23 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 
 export interface RepoRole {
-  /** GitHub repo name (e.g. 'telegram-bot') */
+  /** GitHub repo name (e.g. 'my-app') */
   repo: string;
-  /** IAM role name (e.g. 'TelegramBotDeployRole') */
+  /** IAM role name (e.g. 'MyAppDeployRole') */
   roleName: string;
   /** IAM policy statements for this role */
   policies: iam.PolicyStatement[];
   /** Branch filter — defaults to 'main' */
   branch?: string;
+  /**
+   * Grant the Cloud Control API resource ops (`cloudformation:*Resource(s)`)
+   * required by `cdk deploy --method=direct`. Defaults to false.
+   */
+  directDeployResourceOps?: boolean;
 }
 
 export interface OidcBootstrapStackProps extends cdk.StackProps {
-  /** GitHub org or user (e.g. 'KotaHusky') */
+  /** GitHub org or user (e.g. 'my-org') */
   githubOrg: string;
   /** Per-repo role definitions */
   roles: RepoRole[];
@@ -67,6 +72,35 @@ export class OidcBootstrapStack extends cdk.Stack {
           resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
         }),
       );
+
+      // ListStacks is account-scoped and does not support resource-level
+      // permissions — scoping it to stack ARNs silently denies it, and CDK's
+      // rollback-detection pre-check then logs AccessDenied on every deploy.
+      role.addToPolicy(
+        new iam.PolicyStatement({
+          actions: ['cloudformation:ListStacks'],
+          resources: ['*'],
+        }),
+      );
+
+      if (roleDef.directDeployResourceOps) {
+        // Like ListStacks, the Cloud Control API actions support no
+        // resource-level permissions (verified via the IAM policy
+        // simulator) — any ARN-scoped grant silently matches nothing.
+        role.addToPolicy(
+          new iam.PolicyStatement({
+            sid: 'CdkDirectDeployResourceOps',
+            actions: [
+              'cloudformation:CreateResource',
+              'cloudformation:UpdateResource',
+              'cloudformation:DeleteResource',
+              'cloudformation:GetResource',
+              'cloudformation:ListResources',
+            ],
+            resources: ['*'],
+          }),
+        );
+      }
 
       this.deployRoles.set(roleDef.repo, role);
 

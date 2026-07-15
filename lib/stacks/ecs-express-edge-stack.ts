@@ -18,7 +18,7 @@ export interface EcsExpressEdgeStackProps extends cdk.StackProps {
    */
   albDnsName: string;
   /**
-   * Custom domain (e.g. `kota.dog`). DNS is on **Cloudflare** — this stack
+   * Custom domain (e.g. `example.com`). DNS is on **Cloudflare** — this stack
    * never touches Route 53. When set, CloudFront serves the alias with an ACM
    * cert; you point Cloudflare DNS at the distribution (see below). Omit to use
    * the default `dXXXX.cloudfront.net` domain (e.g. for smoke tests).
@@ -31,7 +31,7 @@ export interface EcsExpressEdgeStackProps extends cdk.StackProps {
    * validation CNAME exists in Cloudflare. With it, deploys never block.
    */
   certificateArn?: string;
-  /** Additional aliases on the same distribution (e.g. `['www.kota.dog']`). */
+  /** Additional aliases on the same distribution (e.g. `['www.example.com']`). */
   additionalAliases?: string[];
   /** CloudFront price class. Defaults to PRICE_CLASS_100 (NA + EU). */
   priceClass?: cloudfront.PriceClass;
@@ -76,7 +76,7 @@ export interface EcsExpressEdgeStackProps extends cdk.StackProps {
  *
  * ### Cloudflare DNS (via the Cloudflare MCP server)
  * After deploy, read the `DistributionDomain` output and, using the Cloudflare
- * MCP server, create these records in the `kota.dog` zone:
+ * MCP server, create these records in the `example.com` zone:
  *   1. CNAME `<domainName>` -> `<DistributionDomain>` (DNS-only / grey-cloud;
  *      do NOT proxy — CloudFront already fronts it).
  *   2. If the stack minted the cert (no `certificateArn`), also add the ACM
@@ -116,7 +116,7 @@ export class EcsExpressEdgeStack extends cdk.Stack {
 
     const obs = props.observability ? resolveObservability(props.observability) : undefined;
 
-    // Redirect any non-primary alias (e.g. www.kota.dog) to the primary domain
+    // Redirect any non-primary alias (e.g. www.example.com) to the primary domain
     // with a 301 — at the edge, before the origin (so it works even though the
     // origin request policy strips Host).
     let fnAssoc: cloudfront.FunctionAssociation[] | undefined;
