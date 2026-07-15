@@ -198,7 +198,7 @@ jobs:
 
 The workflow compares commits between the current and previous semver tags, sends the log to Claude, and creates a release titled `v1.2.0 — <AI-generated title>` with a summary and full changelog.
 
-**Auth:** when `CLAUDE_CODE_OAUTH_TOKEN` is set it is preferred — generation runs via [claude-code-action](https://github.com/anthropics/claude-code-action) on your subscription (requires the [Claude GitHub App](https://github.com/apps/claude); note the action skips if the caller workflow file differs from the repo's default branch, so tag from a commit whose workflows match `main`). Otherwise `ANTHROPIC_API_KEY` is used via direct API calls. One of the two is required.
+**Auth:** when `CLAUDE_CODE_OAUTH_TOKEN` is set it is preferred — generation runs via the Claude Code CLI on your subscription (no GitHub App needed for releases; the CLI works on any trigger, including tag pushes and `auto-version.yml`'s main pushes). Otherwise `ANTHROPIC_API_KEY` is used via direct API calls. One of the two is required.
 
 ### Automatic Versioning
 
