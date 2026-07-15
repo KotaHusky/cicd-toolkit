@@ -126,7 +126,7 @@ export class InviteGating extends Construct {
             'ssm:ListAutomationExecutions',
           ],
           resources: [
-            `arn:aws:ssm:*:*:automation-definition/${resourcePrefix}-invite-admin-runbook:*`,
+            `arn:aws:ssm:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:automation-definition/${resourcePrefix}-invite-admin-runbook:*`,
           ],
         }),
         new iam.PolicyStatement({
