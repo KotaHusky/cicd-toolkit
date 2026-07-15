@@ -387,7 +387,7 @@ jobs:
 |--------|-------------|
 | `release-url` | URL of the created release |
 
-The workflow compares commits between the current and previous semver tags, sends the log to Claude, and creates a release titled `v1.2.0 — <AI-generated title>` with a summary and full changelog.
+The workflow compares commits between the current and previous semver tags, sends the log to Claude, and creates a release titled `v1.2.0 — <AI-generated title>` whose body is the AI summary plus GitHub's generated "What's Changed" (PR-level changelog, Full Changelog compare link, and contributor credit). Mention-safe by construction: PR titles and any `@`/`#` tokens the summary echoes are code-spanned, so release notes can never @-mention unrelated users; the `by @author` attributions are the one intentional mention, driving the release's Contributors section. The commit-level changelog feeds the AI and (when `whats-new` is on) is uploaded as a run artifact rather than duplicated in the body.
 
 **Auth:** when `CLAUDE_CODE_OAUTH_TOKEN` is set it is preferred — generation runs via the Claude Code CLI on your subscription (no GitHub App needed for releases; the CLI works on any trigger, including tag pushes and `auto-version.yml`'s main pushes). Otherwise `ANTHROPIC_API_KEY` is used via direct API calls. One of the two is required.
 
