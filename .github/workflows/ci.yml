@@ -31,6 +31,20 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # Self-contained packages under packages/ carry their own test suites
+      # (root vitest only covers test/**) — run each so they gate CI too.
+      - name: Run package tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for PKG in packages/*/package.json; do
+            [ -e "$PKG" ] || continue
+            DIR=$(dirname "$PKG")
+            echo "::group::${DIR}"
+            (cd "$DIR" && npm ci && npm test)
+            echo "::endgroup::"
+          done
+
   actionlint:
     name: Actionlint
     runs-on: ubuntu-latest

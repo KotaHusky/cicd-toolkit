@@ -42,6 +42,7 @@ Adapt the example rather than authoring a caller from scratch.
 | AI diagnosis when default-branch CI goes red (auto-closing issue) | `ci-doctor.yml` — wire via `workflow_run` on the repo's CI workflows; needs `issues: write` + an Anthropic secret. See `examples/ci-doctor.yml` |
 | Staged promotion (dev → prod approval gates) or deployment tracking | `environment` / `track-deployment` inputs on every AWS deploy workflow — see the README's "Environments, Promotion & Rollback" section |
 | Roll back to a previous release | `examples/rollback.yml` — redeploy the old tag via `checkout-ref` |
+| Invite-only Cognito signups | `packages/invite-gating` — self-contained CDK construct (pre-signup Lambda + DynamoDB codes + SSM admin runbook); see the README's InviteGating section |
 | Azure Container Apps | `aca-provision.yml`, `aca-deploy.yml` |
 | Cloudflare DNS management | `cloudflare-dns.yml` |
 

@@ -39,6 +39,7 @@ to integrate all of it themselves.
 | Automatic releases | [`auto-version.yml`](#automatic-versioning) → [`release.yml`](#ai-powered-release) | Merge to main = release; AI notes; orphan self-heal |
 | End-user release notes in your app | [What's-New summaries](#end-user-whats-new-summaries) + `lib/whats-new` | Curated context, redaction judge, deny-list |
 | Red-CI triage | [`ci-doctor.yml`](#ci-doctor) | AI diagnosis issue, auto-closed on recovery |
+| Invite-only signups (Cognito) | [`InviteGating`](#invitegating-cognito-invite-code-gating--packagesinvite-gating) | Atomic single-use codes; SSM-runbook admin; prebuilt Lambdas |
 | AWS infra building blocks | [CDK constructs](#cdk-constructs) | Static site, ECS edge, OIDC bootstrap, dashboards |
 | Agent-assisted integration | [Claude Code plugin](#claude-code-plugin) | Skills for wiring workflows, secrets, OIDC |
 
@@ -74,6 +75,7 @@ to integrate all of it themselves.
   - [`EcsExpressEdgeStack` (CloudFront in front of ECS Express)](#ecsexpressedgestack-cloudfront-in-front-of-ecs-express)
   - [`OidcBootstrapStack` (GitHub → AWS OIDC provider + deploy roles)](#oidcbootstrapstack-github--aws-oidc-provider--deploy-roles)
   - [`EcsExpressDashboard` / `ecs-express-observability`](#ecsexpressdashboard--ecs-express-observability)
+  - [InviteGating (Cognito invite-code gating) — packages/invite-gating](#invitegating-cognito-invite-code-gating--packagesinvite-gating)
 - [Examples](#examples)
 - [Claude Code plugin](#claude-code-plugin)
 - [Claude PR review](#claude-pr-review)
@@ -800,6 +802,20 @@ One-time bootstrap: the GitHub OIDC provider plus a scoped deploy role per repo 
 ### `EcsExpressDashboard` / `ecs-express-observability`
 
 CloudWatch dashboard (ALB + ECS service metrics) and the tiered alarm set used by `EcsExpressEdgeStack`'s `observability` prop — usable standalone for existing services.
+
+### `InviteGating` (Cognito invite-code gating) — `packages/invite-gating`
+
+Self-contained L3 construct (the first resident of `packages/`, with its own build, tests, and prebuilt Lambda assets): gates Cognito user-pool signups behind single-use invite codes. A pre-signup Lambda atomically claims codes via conditional DynamoDB writes; admins generate/list/revoke through an SSM Automation runbook, with layered IAM (human → automation role → Lambda → table).
+
+```ts
+import { InviteGating } from 'cicd-toolkit/packages/invite-gating/src';
+
+new InviteGating(this, 'InviteGating', {
+  userPool,           // attaches the pre-signup trigger
+});
+```
+
+Operate it via SSM: `aws ssm start-automation-execution --document-name <stack's runbook> --parameters 'Action=generate,...'`. The package ships prebuilt Lambda zips (`assets/`) so consumers don't need a bundler; its test suite runs in this repo's CI alongside the root tests.
 
 ## Examples
 
