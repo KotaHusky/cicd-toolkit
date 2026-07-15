@@ -4,6 +4,15 @@ import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 
 /** SSM parameter name suffixes published by {@link SharedEdgeStack}. */
+/**
+ * Normalize an SSM prefix: ensure exactly one leading slash, no trailing
+ * slash — so producer and consumer stacks can't silently disagree over
+ * `/foo` vs `/foo/` vs `foo`.
+ */
+export function normalizeSsmPrefix(prefix: string): string {
+  return `/${prefix.replace(/^\/+/, '').replace(/\/+$/, '')}`;
+}
+
 export const SHARED_EDGE_SSM_KEYS = {
   nextImageCachePolicyId: 'next-image-cache-policy-id',
   ssrResponseHeadersPolicyId: 'ssr-response-headers-policy-id',
@@ -58,8 +67,9 @@ export interface SharedEdgeStackProps extends cdk.StackProps {
  * });
  * ```
  *
- * IMPORTANT: this stack must be deployed in us-east-1 — CloudFront policies are
- * global resources but CloudFormation only accepts them from the us-east-1 control plane.
+ * IMPORTANT: deploy this stack in the same region as the consuming app
+ * stacks — the SSM parameters are regional. (The CloudFront policies
+ * themselves are global and deployable from any region.)
  */
 export class SharedEdgeStack extends cdk.Stack {
   /** Resolved SSM prefix (without trailing slash). */
@@ -78,7 +88,7 @@ export class SharedEdgeStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: SharedEdgeStackProps) {
     super(scope, id, props);
 
-    this.ssmPrefix = props?.ssmPrefix ?? '/cicd-toolkit/edge';
+    this.ssmPrefix = normalizeSsmPrefix(props?.ssmPrefix ?? '/cicd-toolkit/edge');
 
     // Next.js image optimizer: /_next/image?url=...&w=...&q=... — the query
     // string carries the params, so it must be forwarded AND keyed in the cache

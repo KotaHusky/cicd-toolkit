@@ -9,7 +9,7 @@ import {
   ObservabilityProps,
   resolveObservability,
 } from '../constructs/ecs-express-observability';
-import { SHARED_EDGE_SSM_KEYS } from './shared-edge-stack';
+import { SHARED_EDGE_SSM_KEYS, normalizeSsmPrefix } from './shared-edge-stack';
 
 export interface EcsExpressEdgeStackProps extends cdk.StackProps {
   /**
@@ -188,7 +188,7 @@ export class EcsExpressEdgeStack extends cdk.Stack {
           'SsrCacheControl',
           ssm.StringParameter.valueForStringParameter(
             this,
-            `${props.sharedEdge.ssmPrefix ?? '/cicd-toolkit/edge'}/${SHARED_EDGE_SSM_KEYS.ssrResponseHeadersPolicyId}`,
+            `${normalizeSsmPrefix(props.sharedEdge.ssmPrefix ?? '/cicd-toolkit/edge')}/${SHARED_EDGE_SSM_KEYS.ssrResponseHeadersPolicyId}`,
           ),
         )
       : new cloudfront.ResponseHeadersPolicy(this, 'SsrCacheControl', {
@@ -232,7 +232,7 @@ export class EcsExpressEdgeStack extends cdk.Stack {
           'NextImageCache',
           ssm.StringParameter.valueForStringParameter(
             this,
-            `${props.sharedEdge.ssmPrefix ?? '/cicd-toolkit/edge'}/${SHARED_EDGE_SSM_KEYS.nextImageCachePolicyId}`,
+            `${normalizeSsmPrefix(props.sharedEdge.ssmPrefix ?? '/cicd-toolkit/edge')}/${SHARED_EDGE_SSM_KEYS.nextImageCachePolicyId}`,
           ),
         )
       : new cloudfront.CachePolicy(this, 'NextImageCache', {
