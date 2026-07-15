@@ -4,9 +4,6 @@ import { Template } from 'aws-cdk-lib/assertions';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { InviteGating } from '../construct.js';
 
-// Stub Lambda assets during CDK assertion tests
-process.env.NODE_ENV = 'test';
-
 let template: Template;
 
 beforeAll(() => {
