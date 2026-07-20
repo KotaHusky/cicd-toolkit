@@ -59,6 +59,7 @@ to integrate all of it themselves.
   - [Environments, Promotion & Rollback](#environments-promotion--rollback)
   - [AI-Powered Release](#ai-powered-release)
   - [Automatic Versioning](#automatic-versioning)
+  - [PR Release Labels](#pr-release-labels)
   - [End-User What's-New Summaries](#end-user-whats-new-summaries)
   - [Claude Code Review](#claude-code-review)
   - [CI Doctor](#ci-doctor)
@@ -529,6 +530,36 @@ If a release run fails after tagging (leaving a tag with no GitHub Release), the
 > **Pinning caveat:** the nested `release.yml` call inside `auto-version.yml` is fixed at `@main` (GitHub can't parameterize `uses:`), so pinning `auto-version.yml` to a tag or SHA does **not** transitively pin the release pipeline. If you need a fully pinned release path, call `release.yml@<ref>` yourself from a tag-push workflow instead.
 
 **Tag-only variant:** `semver-tag.yml` is the lower-level workflow: it computes the conventional-commit bump and creates the `vX.Y.Z` tag (needs `contents: write`) but chains to **no** release — the caller wires downstream jobs off its outputs (`new-version`, `new-tag`, `bumped`, `changelog`) itself, as in [`examples/ecs-express.yml`](examples/ecs-express.yml). Its `default-bump` input (default `false` = no bump) can force a bump when no conventional commit calls for one. Prefer `auto-version.yml` unless you're composing the pipeline yourself.
+
+### PR Release Labels
+
+**`pr-release-label.yml`** — Labels every PR with the semver release impact merging it will cause — `release:major` / `release:minor` / `release:patch` / `release:none` — computed from the PR title with the **same rules `auto-version.yml` applies to commits**. In squash-merge repos the PR title becomes the commit subject the release math later inspects, so the label is an exact preview: reviewers see the version consequence before merging, and a mislabeled title (e.g. a `chore:` that should be a `feat:`) is caught at review time instead of at release time. Labels are created on first use — no repo setup needed.
+
+```yaml
+on:
+  pull_request:
+    types: [opened, edited, reopened]
+
+jobs:
+  release-label:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/pr-release-label.yml@main
+    permissions:
+      pull-requests: write
+```
+
+Include `edited` in the trigger so retitling a PR re-labels it; `synchronize` is unnecessary (pushes don't change the title). A `BREAKING CHANGE:` footer line in the PR body also promotes the label to major, matching the commit-footer rule.
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `label-prefix` | string | `release:` | Prefix for the four release-impact labels |
+
+| Output | Description |
+|--------|-------------|
+| `bump` | The computed release impact: `major`, `minor`, `patch`, or `none` |
+
+The step is idempotent — when the correct label is already present it makes no writes, so caller pipelines that trigger on `labeled` are only re-run when the impact actually changes. Fork PRs are skipped (not failed): the `pull_request` token is read-only for forks, so the impact is reported in the log only.
+
+> **Caveat:** the label previews the title's impact at merge time; the actual release bump is computed by `auto-version.yml` from **all** commits since the last tag, so a batch of merged PRs releases at the highest impact among them.
 
 ### End-User What's-New Summaries
 
