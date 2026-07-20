@@ -90,7 +90,7 @@ jobs:
       MAX_LOG_LINES: ${{ inputs.max-log-lines }}
     steps:
       - name: Checkout (needed for Claude CLI working dir)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Fetch failed-job logs
         run: |
