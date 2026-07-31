@@ -64,7 +64,7 @@ Composite actions (`turbo-setup`, `ecr-mirror`, `cfn-recover`) are referenced as
 Determine which secrets the chosen workflow needs (from the fetched README). Common ones:
 
 - `AWS_DEPLOY_ROLE_ARN` — for any AWS deploy workflow; produced by the OIDC bootstrap (see the `bootstrap-oidc` skill). No static AWS keys, ever.
-- `ANTHROPIC_API_KEY` — for `release.yml` AI release notes.
+- `ANTHROPIC_API_KEY` — for `release.yml` AI release notes. Optional: with no Anthropic credential at all, `release.yml` still creates the release from GitHub-generated notes (warning annotation; AI notes and what's-new skipped).
 - `TURBO_TOKEN` / `TURBO_TEAM` — optional, Turbo remote cache.
 - `NODE_AUTH_TOKEN` — optional, private GitHub Packages during builds.
 
