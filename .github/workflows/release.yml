@@ -68,6 +68,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       release-url: ${{ steps.create-release.outputs.release-url }}
+      ai-mode: ${{ steps.auth.outputs.mode }}
     steps:
       - name: Harden runner (egress audit)
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2
@@ -83,7 +84,9 @@ jobs:
 
       # OAuth preferred (one token across repos, subscription-billed);
       # API key is the curl fallback. The secrets context is not allowed in
-      # step-level if:, so resolve the mode once here.
+      # step-level if:, so resolve the mode once here. Missing credentials
+      # never block the release: mode=none warns and takes the degraded
+      # path (GitHub-generated notes only, what's-new skipped).
       - name: Resolve Anthropic credentials
         id: auth
         env:
@@ -95,8 +98,8 @@ jobs:
           elif [ -n "${ANTHROPIC_API_KEY}" ]; then
             echo "mode=api-key" >> "$GITHUB_OUTPUT"
           else
-            echo "::error title=release::Neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY was provided. Pass one via 'secrets:' (or 'secrets: inherit')."
-            exit 1
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            echo "::warning title=release::Neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY was provided — creating the release with GitHub-generated notes only (no AI title/summary; the what's-new summary is skipped). Pass one via 'secrets:' (or 'secrets: inherit') to enable AI release notes."
           fi
 
       - name: Gather changelog
@@ -226,22 +229,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.changelog.outputs.current-tag }}"
-          if [ ! -s .release-work/title.txt ] || [ ! -s .release-work/summary.txt ]; then
-            echo "::error title=release::Release notes were not generated. If using CLAUDE_CODE_OAUTH_TOKEN, check the Claude CLI step logs; or pass ANTHROPIC_API_KEY instead."
-            exit 1
-          fi
-          TITLE=$(cat .release-work/title.txt)
-          SUMMARY=$(cat .release-work/summary.txt)
-          # The AI summary is composed from the commit log and can echo
-          # @handles or #123 tokens from it — code-span such tokens so they
-          # can't become live mentions/autolinks (same class as the
-          # changelog fix below). Existing backticks are stripped first so
-          # the inserted spans stay valid.
-          SUMMARY=$(printf '%s' "$SUMMARY" | tr -d '\140' \
-            | sed -E -e 's/(^|[^[:alnum:]])@([A-Za-z0-9][A-Za-z0-9-]*)/\1`@\2`/g' \
-                     -e 's/(^|[^[:alnum:]])#([0-9]+)/\1`#\2`/g')
+          if [ "${{ steps.auth.outputs.mode }}" = "none" ]; then
+            # Degraded path (no Anthropic credentials): the release still
+            # ships — tag-only title, GitHub-generated notes for the body.
+            SUMMARY=""
+            RELEASE_TITLE="${TAG}"
+          else
+            # Credentials were present, so a missing/empty notes file is a
+            # real generation failure worth stopping on.
+            if [ ! -s .release-work/title.txt ] || [ ! -s .release-work/summary.txt ]; then
+              echo "::error title=release::Release notes were not generated. If using CLAUDE_CODE_OAUTH_TOKEN, check the Claude CLI step logs; or pass ANTHROPIC_API_KEY instead."
+              exit 1
+            fi
+            TITLE=$(cat .release-work/title.txt)
+            SUMMARY=$(cat .release-work/summary.txt)
+            # The AI summary is composed from the commit log and can echo
+            # @handles or #123 tokens from it — code-span such tokens so they
+            # can't become live mentions/autolinks (same class as the
+            # changelog fix below). Existing backticks are stripped first so
+            # the inserted spans stay valid.
+            SUMMARY=$(printf '%s' "$SUMMARY" | tr -d '\140' \
+              | sed -E -e 's/(^|[^[:alnum:]])@([A-Za-z0-9][A-Za-z0-9-]*)/\1`@\2`/g' \
+                       -e 's/(^|[^[:alnum:]])#([0-9]+)/\1`#\2`/g')
 
-          RELEASE_TITLE="${TAG} — ${TITLE}"
+            RELEASE_TITLE="${TAG} — ${TITLE}"
+          fi
 
           # GitHub's generated notes provide the PR-level "What's Changed"
           # list, the Full Changelog compare link, and contributor credit
@@ -276,7 +288,11 @@ jobs:
             echo "::notice title=release::Generated notes contain no PR entries — including the commit-level changelog."
             SAFE_NOTES=$(printf '## Changelog\n\n%s\n\n%s' "$(cat /tmp/changelog.txt)" "$SAFE_NOTES")
           fi
-          RELEASE_BODY=$(printf '%s\n\n%s' "$SUMMARY" "$SAFE_NOTES")
+          if [ -n "$SUMMARY" ]; then
+            RELEASE_BODY=$(printf '%s\n\n%s' "$SUMMARY" "$SAFE_NOTES")
+          else
+            RELEASE_BODY="$SAFE_NOTES"
+          fi
 
           DRAFT_FLAG=""
           if [ "${{ inputs.draft }}" = "true" ]; then
@@ -293,7 +309,7 @@ jobs:
           echo "Release created: ${RELEASE_URL}"
 
       - name: Upload changelog artifact
-        if: ${{ inputs.whats-new }}
+        if: ${{ inputs.whats-new && steps.auth.outputs.mode != 'none' }}
         uses: actions/upload-artifact@v7
         with:
           name: release-changelog
@@ -307,7 +323,10 @@ jobs:
   whats-new:
     name: What's-New Summary
     needs: release
-    if: ${{ inputs.whats-new }}
+    # Also skipped when no Anthropic credentials reached the release job
+    # (ai-mode 'none') — the release itself still ships via its degraded
+    # path, and that job already emitted the warning annotation.
+    if: ${{ inputs.whats-new && needs.release.outputs.ai-mode != 'none' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
