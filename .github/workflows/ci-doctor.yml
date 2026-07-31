@@ -47,6 +47,10 @@ jobs:
     timeout-minutes: 5
     env:
       GH_TOKEN: ${{ github.token }}
+      # gh needs the repo explicitly: this job has no actions/checkout, so without
+      # GH_REPO it falls back to reading a git remote and dies with
+      # "fatal: not a git repository". github.repository is the CALLER's repo.
+      GH_REPO: ${{ github.repository }}
       WORKFLOW_NAME: ${{ inputs.workflow-name }}
       RUN_ID: ${{ inputs.run-id }}
     steps:
@@ -85,6 +89,8 @@ jobs:
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ github.token }}
+      # Explicit repo for gh (see heal job) — don't rely on the checkout below.
+      GH_REPO: ${{ github.repository }}
       WORKFLOW_NAME: ${{ inputs.workflow-name }}
       RUN_ID: ${{ inputs.run-id }}
       MAX_LOG_LINES: ${{ inputs.max-log-lines }}
