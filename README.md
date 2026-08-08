@@ -32,7 +32,7 @@ to integrate all of it themselves.
 | Deploy: AWS CDK | [`cdk-deploy.yml`](#cdk-deploy) + [`cdk-synth.yml`](#cdk-deploy) PR check | OIDC auth; default-on report-only [checkov policy scan](#cdk-deploy) |
 | Per-PR preview environments | [`preview-s3-deploy.yml`](#preview-environments) | Sticky preview URL; auto-teardown on close; needs base-path-aware builds |
 | Deploy: static sites | [`static-s3-deploy.yml`](#static-site-deploy-s3--cloudfront) | S3 + CloudFront + cache strategy |
-| Deploy: containers on ECS | [`ecs-express-deploy.yml` / `ecs-express-app-deploy.yml`](#ecs-express-deploy) | GHCR→ECR mirror, edge stack, dev/prod |
+| Deploy: containers (scale-to-zero) | Lambda Web Adapter + Function URL behind `EcsExpressEdgeStack` — see [br-event-platform](https://github.com/KotaHusky/br-event-platform) as the canonical example; provision infra with `cdk-deploy.yml` | No VPC/ECS/Fargate — those are denied by org policy |
 | Deploy: Azure Container Apps | [`aca-provision.yml` + `aca-deploy.yml`](#azure-container-apps) | Bicep + Azure OIDC |
 | DNS | [`cloudflare-dns.yml`](#cloudflare-dns) | Record upsert + cache purge |
 | Staged promotion, deployment tracking, rollback | [Environments, Promotion & Rollback](#environments-promotion--rollback) | GitHub Environments gates; DORA raw data; redeploy-a-tag rollback |
@@ -53,7 +53,6 @@ to integrate all of it themselves.
   - [CDK Deploy](#cdk-deploy)
   - [Static Site Deploy (S3 + CloudFront)](#static-site-deploy-s3--cloudfront)
   - [Preview Environments](#preview-environments)
-  - [ECS Express Deploy](#ecs-express-deploy)
   - [Azure Container Apps](#azure-container-apps)
   - [Cloudflare DNS](#cloudflare-dns)
   - [Environments, Promotion & Rollback](#environments-promotion--rollback)
@@ -278,75 +277,6 @@ jobs:
 
 Two consumer requirements: the app's build must honor `PREVIEW_BASE_PATH` (exported as `/previews/pr-<N>` before the build — e.g. Next.js `basePath: process.env.PREVIEW_BASE_PATH ?? ''`), and the serving `StaticSiteStack` needs `previewIndexRewrite: true` so CloudFront resolves directory indexes under subpaths. Inputs mirror `static-s3-deploy.yml` (node-version, package-manager, build-command, build-output-dir, working-directory, build-args) plus `preview-domain` (required). Output: `preview-url`. Teardown deletes only the PR's own `previews/pr-<N>` prefix (pattern-guarded) and updates the comment. See [`examples/preview-env.yml`](examples/preview-env.yml).
 
-### ECS Express Deploy
-
-**`ecs-express-app-deploy.yml`** — End-to-end deploy of a containerized app to ECS Express Mode behind CloudFront: builds the image to GHCR, mirrors it to ECR, deploys the Express service, then deploys a CloudFront edge stack from the caller's `infra/` CDK app (a thin `bin/app.ts` instantiating `EcsExpressEdgeStack`). The environment derives from the caller's trigger: `push` → prod, `pull_request` → dev (gated on a `deploy:dev` PR label), `workflow_dispatch` → the `environment` input. DNS is on Cloudflare — after the first deploy, add a CNAME from the domain to the distribution domain.
-
-```yaml
-jobs:
-  deploy:
-    uses: KotaHusky/cicd-toolkit/.github/workflows/ecs-express-app-deploy.yml@main
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-    with:
-      app: my-app                    # GHCR image name + ECR repo + prod service name
-      stack-prefix: MyApp            # CDK stacks: MyAppProd / MyAppDev
-      prod-domain: app.example.com
-      dev-domain: dev.app.example.com
-      prod-cert-arn: arn:aws:acm:us-east-1:123456789012:certificate/aaaa-bbbb
-      dev-cert-arn: arn:aws:acm:us-east-1:123456789012:certificate/cccc-dddd
-      aws-account-id: '123456789012'
-    secrets:
-      role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-      execution-role-arn: ${{ secrets.ECS_EXECUTION_ROLE_ARN }}
-      infrastructure-role-arn: ${{ secrets.ECS_INFRASTRUCTURE_ROLE_ARN }}
-```
-
-Key inputs (see the workflow file for the full list):
-
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `app` | string | — | App slug: GHCR image name + ECR repo + prod service name (required) |
-| `stack-prefix` | string | — | CDK stack id prefix; stacks are `<prefix>Prod` / `<prefix>Dev` (required) |
-| `prod-domain` / `dev-domain` | string | — | Domains per environment (required) |
-| `prod-cert-arn` / `dev-cert-arn` | string | — | us-east-1 ACM cert ARNs per domain (required) |
-| `aws-account-id` | string | — | Target AWS account (required) |
-| `aws-region` | string | `us-east-1` | AWS region |
-| `container-port` | number | `3000` | Container port that receives traffic |
-| `cpu` / `memory` | string | `256` / `512` | Fargate sizing (floor values; raise for heavier apps) |
-| `health-check-path` | string | `/api/health` | ALB health-check path |
-| `prod-bake-minutes` | string | `0` | Prod canary bake; `0` promotes as soon as healthy. Dev is always `0` |
-
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `role-arn` | yes | IAM role for AWS authentication via OIDC |
-| `execution-role-arn` | yes | ECS task execution role (pulls image, writes logs) |
-| `infrastructure-role-arn` | yes | ECS infrastructure role (manages ALB/target groups/SGs) |
-| `node-auth-token` | no | PAT (`read:packages`) for private npm deps during the image build |
-
-**`ecs-express-deploy.yml`** — the lower-level building block: points an ECS Express service at an existing container image (creating the service on first deploy) and manages canary bake time, auto-scaling, and health checks. Use it directly when you bring your own image and edge/infra pipeline — see [`examples/ecs-express.yml`](examples/ecs-express.yml). Takes the same three role-ARN secrets as above (`node-auth-token` not needed).
-
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `service-name` | string | — | ECS Express service name (required) |
-| `image` | string | — | Full container image URI (required) |
-| `aws-region` | string | `us-east-1` | AWS region |
-| `cluster` | string | `''` | ECS cluster (Express Mode creates one if omitted) |
-| `container-port` | number | `80` | Container port that receives traffic |
-| `cpu` / `memory` | string | `512` / `1024` | Fargate sizing |
-| `bake-time-minutes` | string | `''` | Canary bake (mins); `0` promotes as soon as healthy, empty keeps the service default |
-| `health-check-path` | string | `/` | ALB health-check path |
-| `min-task-count` / `max-task-count` | number | `1` / `3` | Auto-scaling floor / ceiling |
-
-…plus env vars, container secrets, command, networking (subnets/security groups), task role, and tags — see the workflow file.
-
-| Output | Description |
-|--------|-------------|
-| `service-arn` | ARN of the deployed Express service |
-| `endpoint` | Public endpoint URL (ALB DNS name) |
-
 ### Azure Container Apps
 
 **`aca-provision.yml`** + **`aca-deploy.yml`** — Provision Container Apps infrastructure from a Bicep template (Day-2 updates; the very first bootstrap runs locally, see [`examples/aca.yml`](examples/aca.yml)), then deploy a container image to the app. Both authenticate via Azure OIDC federated credentials — grant the calling workflow `id-token: write`.
@@ -440,7 +370,7 @@ jobs:
 
 ### Environments, Promotion & Rollback
 
-All AWS deploy workflows (`cdk-deploy.yml`, `static-s3-deploy.yml`, `ecs-express-deploy.yml`, `ecs-express-app-deploy.yml`) accept two additional inputs (on `ecs-express-app-deploy.yml` the GitHub Environment input is named **`gh-environment`**, because its pre-existing `environment` input selects the dev|prod runtime env):
+All AWS deploy workflows (`cdk-deploy.yml`, `static-s3-deploy.yml`) accept two additional inputs:
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -528,7 +458,7 @@ If a release run fails after tagging (leaving a tag with no GitHub Release), the
 
 > **Pinning caveat:** the nested `release.yml` call inside `auto-version.yml` is fixed at `@main` (GitHub can't parameterize `uses:`), so pinning `auto-version.yml` to a tag or SHA does **not** transitively pin the release pipeline. If you need a fully pinned release path, call `release.yml@<ref>` yourself from a tag-push workflow instead.
 
-**Tag-only variant:** `semver-tag.yml` is the lower-level workflow: it computes the conventional-commit bump and creates the `vX.Y.Z` tag (needs `contents: write`) but chains to **no** release — the caller wires downstream jobs off its outputs (`new-version`, `new-tag`, `bumped`, `changelog`) itself, as in [`examples/ecs-express.yml`](examples/ecs-express.yml). Its `default-bump` input (default `false` = no bump) can force a bump when no conventional commit calls for one. Prefer `auto-version.yml` unless you're composing the pipeline yourself.
+**Tag-only variant:** `semver-tag.yml` is the lower-level workflow: it computes the conventional-commit bump and creates the `vX.Y.Z` tag (needs `contents: write`) but chains to **no** release — the caller wires downstream jobs off its outputs (`new-version`, `new-tag`, `bumped`, `changelog`) itself, as in [`examples/static-site.yml`](examples/static-site.yml). Its `default-bump` input (default `false` = no bump) can force a bump when no conventional commit calls for one. Prefer `auto-version.yml` unless you're composing the pipeline yourself.
 
 ### End-User What's-New Summaries
 
@@ -791,9 +721,9 @@ new EcsExpressEdgeStack(app, 'MyAppEdge', {
 
 Result: 1 of each policy account-wide instead of two per app — the policy quota stops being the ceiling (~200 apps; per-stack redirect functions become the next wall around ~50 alias-using apps). Omitting `sharedEdge` keeps the original per-stack behavior, fully backward compatible.
 
-### `EcsExpressEdgeStack` (CloudFront in front of ECS Express)
+### `EcsExpressEdgeStack` (CloudFront edge — origin-agnostic)
 
-CloudFront distribution over an ECS Express service's ALB: custom-domain ACM cert, alias redirects, Next.js-aware cache behaviors (static assets long-cached, `/_next/image` query-string-aware), and opt-in tiered observability (dashboards + alarms via `observability: { tier: 'prod' | 'dev', alarmEmail }`). Pairs with [`ecs-express-app-deploy.yml`](#ecs-express-deploy), which synthesizes it from the consumer's thin CDK app.
+CloudFront distribution with a custom-domain ACM cert, alias redirects, Next.js-aware cache behaviors (static assets long-cached, `/_next/image` query-string-aware), and opt-in tiered observability (dashboards + alarms via `observability: { tier: 'prod' | 'dev', alarmEmail }`). The origin can be any HTTPS hostname — an ALB **or** a Lambda Function URL. This stack creates no VPC, ECS, or Fargate resources. The canonical consumer pattern is **Lambda Web Adapter** (scale-to-zero) behind this stack, deployed via `cdk-deploy.yml`. VPC/ECS/Fargate is denied by org policy.
 
 ### `OidcBootstrapStack` (GitHub → AWS OIDC provider + deploy roles)
 
@@ -832,7 +762,6 @@ See [`examples/`](examples/) for ready-to-copy workflow files:
 - [`claude-review.yml`](examples/claude-review.yml) — Claude PR review (inline comments + sticky summary)
 - [`cloudflare-dns.yml`](examples/cloudflare-dns.yml) — Upsert a Cloudflare DNS record, optional cache purge
 - [`docker-ghcr.yml`](examples/docker-ghcr.yml) — Build a Docker image and push it to GHCR
-- [`ecs-express.yml`](examples/ecs-express.yml) — Tag-driven release for a containerized app on ECS Express Mode
 - [`rollback.yml`](examples/rollback.yml) — One-click redeploy of a previous release tag via workflow_dispatch
 - [`preview-env.yml`](examples/preview-env.yml) — Per-PR static-site preview deploys with auto-teardown
 - [`release.yml`](examples/release.yml) — AI-powered release on tag push

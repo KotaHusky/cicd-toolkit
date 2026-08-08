@@ -1,6 +1,6 @@
 ---
 name: integrate-cicd-toolkit
-description: Integrate KotaHusky/cicd-toolkit reusable workflows and composite actions into the current repo — pick the right workflow, wire up the caller file, and set required secrets securely. Use when adding CI/CD (build verification, commitlint, Docker/GHCR, CDK deploys, static-site S3/CloudFront deploys, ECS Express deploys, automatic versioning, AI-generated releases) to a repo that consumes cicd-toolkit.
+description: Integrate KotaHusky/cicd-toolkit reusable workflows and composite actions into the current repo — pick the right workflow, wire up the caller file, and set required secrets securely. Use when adding CI/CD (build verification, commitlint, Docker/GHCR, CDK deploys, static-site S3/CloudFront deploys, Lambda Web Adapter container deploys, automatic versioning, AI-generated releases) to a repo that consumes cicd-toolkit.
 ---
 
 # Integrate cicd-toolkit
@@ -33,7 +33,7 @@ Adapt the example rather than authoring a caller from scratch.
 | Deploy AWS CDK app (OIDC auth) | `cdk-deploy.yml` (synth-only check: `cdk-synth.yml`, which includes a report-only checkov policy scan by default) |
 | Static site (Next.js/Astro/Vite) → S3 + CloudFront | `static-s3-deploy.yml` |
 | Per-PR preview environments for static sites | `preview-s3-deploy.yml` — needs `pull-requests: write`, a base-path-aware build (`PREVIEW_BASE_PATH`), and `previewIndexRewrite: true` on StaticSiteStack. See `examples/preview-env.yml` |
-| Node/Express app → ECS Fargate | `ecs-express-deploy.yml` / `ecs-express-app-deploy.yml` |
+| Containerized Node/Express app (scale-to-zero) | Lambda Web Adapter + Function URL + `EcsExpressEdgeStack` (CloudFront) — deploy infra with `cdk-deploy.yml`. See [br-event-platform](https://github.com/KotaHusky/br-event-platform) as the canonical example. **VPC/ECS/Fargate is denied by org policy.** |
 | Automatic versioning + AI release on every merge to main (recommended) | `auto-version.yml` — computes the semver bump from conventional commits (no checkout, pure API), tags, and runs `release.yml`; pair with `commitlint.yml`. Caller needs `contents: write` |
 | GitHub Release with AI-generated notes on manual `v*` tag | `release.yml` |
 | Claude AI review on every PR (inline + sticky summary) | `claude-review.yml` — needs the [Claude GitHub App](https://github.com/apps/claude) installed and `ANTHROPIC_API_KEY` **or** `CLAUDE_CODE_OAUTH_TOKEN`; advisory by default (never blocks CI), `strict: true` to enforce |
