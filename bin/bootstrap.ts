@@ -7,24 +7,28 @@ import { OidcBootstrapStack, type RepoRole } from '../lib/stacks/oidc-bootstrap-
  * `bin/bootstrap.roles.ts` so this shared toolkit stays repo-agnostic — no
  * consumer app names or ARNs in tracked source. Copy
  * `bin/bootstrap.roles.example.ts` → `bin/bootstrap.roles.ts` and edit it.
- * Falls back to the placeholder example when the local file is absent (e.g.
- * CI typecheck/synth), so the build never depends on untracked config.
+ *
+ * If the local file is missing we THROW — we never fall back to the example.
+ * The documented invocation is `cdk deploy`, so silently synthesizing the
+ * placeholder would DELETE every real deploy role from the live stack. Type
+ * errors in the local file surface for the same reason. `tsc`/tests never call
+ * this (they type-check the file and test the construct directly), so CI is
+ * unaffected by the local file's absence.
  */
 function loadRoles(): RepoRole[] {
-  for (const mod of ['./bootstrap.roles', './bootstrap.roles.example']) {
-    let resolved: string;
-    try {
-      resolved = require.resolve(mod);
-    } catch {
-      continue; // not present — try the next candidate
+  try {
+    return (require('./bootstrap.roles') as { roles: RepoRole[] }).roles;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/Cannot find module '\.\/bootstrap\.roles'/.test(msg)) {
+      throw new Error(
+        "bin/bootstrap.roles.ts not found — copy bin/bootstrap.roles.example.ts to " +
+          "bin/bootstrap.roles.ts and define your per-repo deploy roles before deploying " +
+          "(it's gitignored to keep app identities out of this shared toolkit).",
+      );
     }
-    const loaded = (require(resolved) as { roles?: RepoRole[] }).roles;
-    if (!Array.isArray(loaded)) {
-      throw new Error(`${mod} must export a \`roles: RepoRole[]\` array`);
-    }
-    return loaded;
+    throw err; // real error (type error / missing dep) — never deploy the placeholder
   }
-  return [];
 }
 
 const app = new cdk.App();

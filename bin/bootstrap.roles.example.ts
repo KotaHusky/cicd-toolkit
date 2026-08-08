@@ -4,10 +4,12 @@ import type { RepoRole } from '../lib/stacks/oidc-bootstrap-stack';
 /**
  * Example per-repo deploy-role config for `bin/bootstrap.ts`.
  *
- * Copy this file to `bin/bootstrap.roles.ts` (gitignored) and replace the
- * placeholders with your own repo(s), role name(s), and least-privilege policy
- * statements. Keep real app names and ARNs in that LOCAL file only — never
- * commit them to this shared toolkit.
+ * PLACEHOLDER ONLY — do NOT deploy this file. It defines a real, broadly
+ * privileged `MyAppDeployRole`; deploying it would create that role in your
+ * account. Copy this file to `bin/bootstrap.roles.ts` (gitignored) and replace
+ * the placeholders with your own repo(s), role name(s), and least-privilege
+ * policy statements. Keep real app names and ARNs in that LOCAL file only —
+ * never commit them to this shared toolkit.
  */
 export const roles: RepoRole[] = [
   {
