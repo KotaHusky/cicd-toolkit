@@ -6,11 +6,13 @@ import { applyTags } from '../lib/constructs/standard-tags';
 
 const ENV = { account: '111111111111', region: 'us-east-1' };
 const ENDPOINT = 'ho-6aa8cf0a33c84998b3e7bd4906bbf686.ecs.us-east-1.on.aws';
+const TAGS = { Project: 'test', Environment: 'test', Repository: 'owner/repo' };
 
 function makeStack(overrides: Partial<ConstructorParameters<typeof EcsExpressEdgeStack>[2]> = {}) {
   const app = new cdk.App();
   return new EcsExpressEdgeStack(app, 'TestEdge', {
     env: ENV,
+    standardTags: TAGS,
     albDnsName: ENDPOINT,
     domainName: 'example.com',
     ...overrides,
@@ -108,7 +110,7 @@ describe('EcsExpressEdgeStack (Cloudflare DNS, no Route53)', () => {
   test('default-domain mode: no cert, no aliases', () => {
     const app = new cdk.App();
     const template = Template.fromStack(
-      new EcsExpressEdgeStack(app, 'NoDomain', { env: ENV, albDnsName: ENDPOINT }),
+      new EcsExpressEdgeStack(app, 'NoDomain', { env: ENV, standardTags: TAGS, albDnsName: ENDPOINT }),
     );
     template.resourceCountIs('AWS::CertificateManager::Certificate', 0);
     template.resourceCountIs('AWS::Route53::RecordSet', 0);
@@ -120,7 +122,7 @@ describe('EcsExpressEdgeStack (Cloudflare DNS, no Route53)', () => {
 
   test('throws when albDnsName is missing', () => {
     const app = new cdk.App();
-    expect(() => new EcsExpressEdgeStack(app, 'Bad', { env: ENV, albDnsName: '' })).toThrow(
+    expect(() => new EcsExpressEdgeStack(app, 'Bad', { env: ENV, standardTags: TAGS, albDnsName: '' })).toThrow(
       /albDnsName is required/,
     );
   });

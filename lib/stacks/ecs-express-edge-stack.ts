@@ -10,6 +10,7 @@ import {
   resolveObservability,
 } from '../constructs/ecs-express-observability';
 import { SHARED_EDGE_SSM_KEYS, normalizeSsmPrefix } from './shared-edge-stack';
+import { StandardTags, applyStandardTags } from '../constructs/standard-tags';
 
 export interface EcsExpressEdgeStackProps extends cdk.StackProps {
   /**
@@ -83,6 +84,9 @@ export interface EcsExpressEdgeStackProps extends cdk.StackProps {
      */
     ssmPrefix?: string;
   };
+
+  /** Cost-allocation tags. Project/Environment/Repository required. */
+  readonly standardTags: StandardTags;
 }
 
 /**
@@ -122,6 +126,7 @@ export class EcsExpressEdgeStack extends cdk.Stack {
 
   constructor(scope: Construct, id: string, props: EcsExpressEdgeStackProps) {
     super(scope, id, props);
+    applyStandardTags(this, props.standardTags);
 
     if (!props.albDnsName) {
       throw new Error('EcsExpressEdgeStack: albDnsName is required (the ECS Express endpoint).');

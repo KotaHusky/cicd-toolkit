@@ -8,6 +8,7 @@ describe('OidcBootstrapStack', () => {
   const app = new cdk.App();
   const stack = new OidcBootstrapStack(app, 'TestBootstrap', {
     githubOrg: 'TestOrg',
+    standardTags: { Project: 'test', Environment: 'test', Repository: 'owner/repo' },
     roles: [
       {
         repo: 'repo-a',
