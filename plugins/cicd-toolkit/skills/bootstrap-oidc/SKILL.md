@@ -1,6 +1,6 @@
 ---
 name: bootstrap-oidc
-description: One-time AWS setup so a GitHub repo can deploy via cicd-toolkit's AWS workflows (cdk-deploy, static-s3-deploy, ECS) using OIDC instead of static credentials. Use when a consumer repo hits missing AWS_DEPLOY_ROLE_ARN, "not authorized to perform sts:AssumeRoleWithWebIdentity", or is adopting an AWS deploy workflow for the first time.
+description: One-time AWS setup so a GitHub repo can deploy via cicd-toolkit's AWS workflows (cdk-deploy, static-s3-deploy, Lambda Web Adapter) using OIDC instead of static credentials. Use when a consumer repo hits missing AWS_DEPLOY_ROLE_ARN, "not authorized to perform sts:AssumeRoleWithWebIdentity", or is adopting an AWS deploy workflow for the first time. Note: VPC/ECS/Fargate are denied by org policy — containerized apps deploy via Lambda Web Adapter.
 ---
 
 # Bootstrap GitHub → AWS OIDC

@@ -54,40 +54,28 @@ jobs:
     #   deployments: write
 
   # ---------------------------------------------------------------------------
-  # ECS / container rollback — uncomment and adapt one of the variants below.
+  # Lambda Web Adapter container rollback — rebuild + redeploy via cdk-deploy.
   #
-  # Variant A: full end-to-end (image build → ECR mirror → ECS service → edge).
-  # Use this when rolling back a Next.js / SSR app deployed via ecs-express-app-deploy.
+  # Container apps in this org deploy to AWS Lambda Web Adapter (scale-to-zero)
+  # behind EcsExpressEdgeStack (CloudFront). VPC/ECS/Fargate are denied by
+  # org policy. To roll back, check out the old tag, rebuild the image, push
+  # to GHCR/ECR, then re-run cdk-deploy with the pinned image digest.
+  #
+  # The exact CDK context vars depend on your consumer's infra app — see
+  # br-event-platform for the canonical Lambda Web Adapter pattern.
   # ---------------------------------------------------------------------------
-  # rollback-ecs-app:
-  #   name: Rollback ECS app to ${{ inputs.tag }}
-  #   uses: KotaHusky/cicd-toolkit/.github/workflows/ecs-express-app-deploy.yml@main
+  # rollback-lambda-app:
+  #   name: Rollback Lambda app to ${{ inputs.tag }}
+  #   uses: KotaHusky/cicd-toolkit/.github/workflows/cdk-deploy.yml@main
+  #   permissions:
+  #     id-token: write
+  #     contents: read
   #   with:
-  #     checkout-ref: ${{ inputs.tag }}      # rebuilds image from the tagged commit
-  #     app: my-app                          # <-- your app slug
-  #     stack-prefix: MyApp                  # <-- your CDK stack prefix
-  #     prod-domain: my-app.example.com      # <-- your prod domain
-  #     dev-domain: dev.my-app.example.com   # <-- your dev domain
-  #     prod-cert-arn: arn:aws:acm:us-east-1:000000000000:certificate/placeholder
-  #     dev-cert-arn: arn:aws:acm:us-east-1:000000000000:certificate/placeholder
-  #     aws-account-id: '000000000000'       # <-- your AWS account ID
-  #     # gh-environment: production         # optional GitHub environment gate
-  #     # track-deployment: true             # optional DORA tracking
-  #   secrets: inherit
-
-  # ---------------------------------------------------------------------------
-  # Variant B: ECS-only (pre-built ECR image already exists at the tag's SHA).
-  # Use when you have a separate build pipeline and only need to redeploy.
-  # ---------------------------------------------------------------------------
-  # rollback-ecs-service:
-  #   name: Rollback ECS service to ${{ inputs.tag }}
-  #   uses: KotaHusky/cicd-toolkit/.github/workflows/ecs-express-deploy.yml@main
-  #   with:
-  #     service-name: my-app                 # <-- your ECS service name
-  #     # Construct the ECR image URI from the tag's commit SHA.
-  #     # In practice, resolve the SHA outside this workflow and pass it in,
-  #     # or use a separate lookup step before calling this workflow.
-  #     image: '000000000000.dkr.ecr.us-east-1.amazonaws.com/my-app:${{ inputs.tag }}'
-  #     # environment: production            # optional GitHub environment gate
-  #     # track-deployment: true             # optional DORA tracking
-  #   secrets: inherit
+  #     checkout-ref: ${{ inputs.tag }}
+  #     aws-region: us-east-1
+  #     cdk-context: 'env=prod imageTag=${{ inputs.tag }}'   # <-- adapt to your app
+  #     stack-prefix: MyApp                                   # <-- your CDK stack prefix
+  #     # environment: production                             # optional GitHub env gate
+  #     # track-deployment: true                              # optional DORA tracking
+  #   secrets:
+  #     role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
