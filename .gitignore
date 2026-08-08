@@ -7,6 +7,10 @@ cdk.out/
 !jest.config.js
 !vitest.config.ts
 
+# Local, gitignored per-repo deploy-role config for bin/bootstrap.ts — keeps
+# consumer app names/ARNs out of this shared toolkit (see bootstrap.roles.example.ts).
+bin/bootstrap.roles.ts
+
 .env
 .env.*
 
