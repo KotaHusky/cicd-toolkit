@@ -117,10 +117,27 @@ on:
         required: false
         type: boolean
         default: false
+      npm-scope:
+        description: >-
+          npm scope for a private registry (e.g. @kotahusky). Enables
+          scoped-registry auth when set.
+        required: false
+        type: string
+        default: ''
+      registry-url:
+        description: 'Registry URL for the scope (e.g. https://npm.pkg.github.com).'
+        required: false
+        type: string
+        default: ''
     secrets:
       role-arn:
         description: 'IAM role ARN for AWS authentication via OIDC'
         required: true
+      packages-read-token:
+        description: >-
+          Token with read:packages for the private scope; used as
+          NODE_AUTH_TOKEN during install.
+        required: false
     outputs:
       invalidation-id:
         description: 'CloudFront invalidation ID'
@@ -136,6 +153,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  packages: read
 
 jobs:
   deploy:
@@ -165,9 +183,18 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
           cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.package-manager == 'pnpm' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+          # When registry-url is set, setup-node writes an .npmrc wiring the
+          # scope to the private registry with NODE_AUTH_TOKEN. Empty values are
+          # a no-op, so public-package builds are unaffected.
+          registry-url: ${{ inputs.registry-url }}
+          scope: ${{ inputs.npm-scope }}
 
       - name: Install dependencies
         shell: bash
+        env:
+          # Consumed by the .npmrc setup-node writes when registry-url is set.
+          # Harmless when empty (public-package builds).
+          NODE_AUTH_TOKEN: ${{ secrets.packages-read-token }}
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             corepack enable
