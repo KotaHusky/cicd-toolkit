@@ -8,9 +8,22 @@ on:
         required: true
         type: string
       distribution-id:
-        description: 'CloudFront distribution ID for cache invalidation'
-        required: true
+        description: >-
+          CloudFront distribution ID for cache invalidation. Omit for
+          Cloudflare-Worker-fronted buckets — CloudFront invalidation is
+          skipped when empty.
+        required: false
         type: string
+        default: ''
+      tags:
+        description: >-
+          Cost-allocation tags as space-separated Key=Value pairs. Project and
+          Environment are REQUIRED (deploy fails without them); Repository is
+          auto-added from github.repository. e.g. "Project=homepage
+          Environment=prod".
+        required: false
+        type: string
+        default: ''
       aws-region:
         description: 'AWS region for the S3 bucket'
         required: false
@@ -196,6 +209,45 @@ jobs:
           role-to-assume: ${{ secrets.role-arn }}
           aws-region: ${{ inputs.aws-region }}
 
+      - name: Resolve deploy tags
+        id: tags
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          TAGS_IN: ${{ inputs.tags }}
+        run: |
+          set -euo pipefail
+          ENTRIES=""
+          HAS_PROJECT=0
+          HAS_ENV=0
+          HAS_REPO=0
+          # tags is a space-separated list of Key=Value pairs; word-splitting is
+          # intentional so each pair becomes its own TagSet entry.
+          # shellcheck disable=SC2086
+          for PAIR in ${TAGS_IN}; do
+            KEY="${PAIR%%=*}"
+            VAL="${PAIR#*=}"
+            ENTRIES="${ENTRIES}${ENTRIES:+,}{Key=${KEY},Value=${VAL}}"
+            case "${KEY}" in
+              Project)     [ -n "${VAL}" ] && HAS_PROJECT=1 ;;
+              Environment) [ -n "${VAL}" ] && HAS_ENV=1 ;;
+              Repository)  HAS_REPO=1 ;;
+            esac
+          done
+          # Auto-add Repository from the calling repo unless the caller set it.
+          if [ "${HAS_REPO}" = "0" ]; then
+            ENTRIES="${ENTRIES}${ENTRIES:+,}{Key=Repository,Value=${REPO}}"
+          fi
+          # Enforce the required cost-allocation tags (fail fast before sync).
+          MISSING=""
+          [ "${HAS_PROJECT}" = "0" ] && MISSING="${MISSING} Project"
+          [ "${HAS_ENV}" = "0" ] && MISSING="${MISSING} Environment"
+          if [ -n "${MISSING}" ]; then
+            echo "::error title=Missing required tags::static-s3-deploy requires these tag(s) via the 'tags' input:${MISSING}. Example: tags: \"Project=homepage Environment=prod\" (Repository is added automatically)."
+            exit 1
+          fi
+          echo "tagset=TagSet=[${ENTRIES}]" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Deployment (DORA tracking)
         id: gh-deploy
         if: inputs.track-deployment
@@ -263,8 +315,16 @@ jobs:
           COUNT=$({ grep -E '^(upload|copy):' /tmp/sync.log || true; } | wc -l | tr -d ' ')
           echo "objects-uploaded=${COUNT}" >> "$GITHUB_OUTPUT"
 
+      - name: Tag S3 bucket
+        shell: bash
+        run: |
+          aws s3api put-bucket-tagging \
+            --bucket "${{ inputs.bucket-name }}" \
+            --tagging "${{ steps.tags.outputs.tagset }}"
+
       - name: Invalidate CloudFront cache
         id: invalidate
+        if: inputs.distribution-id != ''
         shell: bash
         run: |
           # Convert newline- or space-separated input to a space-joined list.
@@ -291,7 +351,10 @@ jobs:
         run: |
           set -euo pipefail
           STATE="failure"
-          if [ "${SYNC_OUTCOME}" = "success" ] && [ "${INVALIDATE_OUTCOME}" = "success" ]; then
+          # Invalidation is skipped for Cloudflare-Worker-fronted buckets
+          # (empty distribution-id); treat "skipped" as non-blocking.
+          if [ "${SYNC_OUTCOME}" = "success" ] \
+             && { [ "${INVALIDATE_OUTCOME}" = "success" ] || [ "${INVALIDATE_OUTCOME}" = "skipped" ]; }; then
             STATE="success"
           fi
           gh api "repos/${REPO}/deployments/${DEPLOY_ID}/statuses" \
@@ -305,5 +368,9 @@ jobs:
           echo "### Static site deploy" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Bucket:** \`s3://${{ inputs.bucket-name }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Objects synced:** ${{ steps.sync.outputs.objects-uploaded }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Distribution:** \`${{ inputs.distribution-id }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Invalidation:** \`${{ steps.invalidate.outputs.invalidation-id }}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${{ inputs.distribution-id }}" ]; then
+            echo "- **Distribution:** \`${{ inputs.distribution-id }}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Invalidation:** \`${{ steps.invalidate.outputs.invalidation-id }}\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- **CloudFront:** skipped (Cloudflare-Worker-fronted bucket)" >> "$GITHUB_STEP_SUMMARY"
+          fi
