@@ -12,11 +12,17 @@ import { OidcBootstrapStack, type RepoRole } from '../lib/stacks/oidc-bootstrap-
  */
 function loadRoles(): RepoRole[] {
   for (const mod of ['./bootstrap.roles', './bootstrap.roles.example']) {
+    let resolved: string;
     try {
-      return (require(mod) as { roles: RepoRole[] }).roles;
+      resolved = require.resolve(mod);
     } catch {
-      // not present — try the next candidate
+      continue; // not present — try the next candidate
     }
+    const loaded = (require(resolved) as { roles?: RepoRole[] }).roles;
+    if (!Array.isArray(loaded)) {
+      throw new Error(`${mod} must export a \`roles: RepoRole[]\` array`);
+    }
+    return loaded;
   }
   return [];
 }

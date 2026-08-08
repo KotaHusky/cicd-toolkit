@@ -13,7 +13,7 @@ export const roles: RepoRole[] = [
   {
     repo: 'my-app',
     roleName: 'MyAppDeployRole',
-    branch: '*',
+    // branch: '*', // any ref may assume the role; omit to trust `main` only
     // directDeployResourceOps: true, // if you `cdk deploy --method=direct`
     policies: [
       new iam.PolicyStatement({
