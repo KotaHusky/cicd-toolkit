@@ -22,6 +22,16 @@ on:
         description: 'CDK context flags (space-separated key=value pairs)'
         required: true
         type: string
+      tags:
+        description: >-
+          Cost-allocation tags as space-separated Key=Value pairs. Project and
+          Environment are REQUIRED (deploy fails without them); Repository is
+          added automatically from github.repository. Optional extras like
+          Owner/Service/CostCenter may be appended.
+          Example: "Project=homepage Environment=prod".
+        required: false
+        type: string
+        default: ''
       stacks:
         description: 'Stacks to deploy (default: --all)'
         required: false
@@ -141,6 +151,45 @@ jobs:
           done
           echo "flags=${CONTEXT_FLAGS}" >> "$GITHUB_OUTPUT"
 
+      - name: Build CDK tag flags
+        id: tags
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          TAGS_IN: ${{ inputs.tags }}
+        run: |
+          set -euo pipefail
+          TAG_FLAGS=""
+          HAS_PROJECT=0
+          HAS_ENV=0
+          HAS_REPO=0
+          # tags is a space-separated list of Key=Value pairs; word-splitting is
+          # intentional so each pair becomes its own --tags token.
+          # shellcheck disable=SC2086
+          for PAIR in ${TAGS_IN}; do
+            KEY="${PAIR%%=*}"
+            VAL="${PAIR#*=}"
+            TAG_FLAGS="${TAG_FLAGS} --tags ${PAIR}"
+            case "${KEY}" in
+              Project)    [ -n "${VAL}" ] && HAS_PROJECT=1 ;;
+              Environment)[ -n "${VAL}" ] && HAS_ENV=1 ;;
+              Repository) HAS_REPO=1 ;;
+            esac
+          done
+          # Auto-add Repository from the calling repo unless the caller set it.
+          if [ "${HAS_REPO}" = "0" ]; then
+            TAG_FLAGS="${TAG_FLAGS} --tags Repository=${REPO}"
+          fi
+          # Enforce the required cost-allocation tags.
+          MISSING=""
+          [ "${HAS_PROJECT}" = "0" ] && MISSING="${MISSING} Project"
+          [ "${HAS_ENV}" = "0" ] && MISSING="${MISSING} Environment"
+          if [ -n "${MISSING}" ]; then
+            echo "::error title=Missing required tags::cdk-deploy requires these tag(s) via the 'tags' input:${MISSING}. Example: tags: \"Project=homepage Environment=prod\" (Repository is added automatically)."
+            exit 1
+          fi
+          echo "flags=${TAG_FLAGS}" >> "$GITHUB_OUTPUT"
+
       # Synth once, reuse for diff + deploy (avoids double synthesis)
       - name: CDK synth
         run: npx cdk synth --quiet ${{ steps.context.outputs.flags }} -o cdk.deploy.out
@@ -187,6 +236,7 @@ jobs:
             --require-approval never \
             --concurrency ${{ inputs.concurrency }} \
             --method=${{ inputs.method }} \
+            ${{ steps.tags.outputs.flags }} \
             ${HOTSWAP_FLAG}
 
       - name: Post GitHub Deployment status (DORA tracking)
