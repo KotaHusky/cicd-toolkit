@@ -4,13 +4,11 @@ import { Template, Match } from 'aws-cdk-lib/assertions';
 import { StaticSiteStack } from '../lib/stacks/static-site-stack';
 
 const ENV = { account: '111111111111', region: 'us-east-1' };
-const TAGS = { Project: 'test', Environment: 'test', Repository: 'owner/repo' };
 
 function makeStack(overrides: Partial<ConstructorParameters<typeof StaticSiteStack>[2]> = {}) {
   const app = new cdk.App();
   return new StaticSiteStack(app, 'TestSite', {
     env: ENV,
-    standardTags: TAGS,
     domainName: 'site.example.com',
     hostedZoneName: 'example.com',
     ...overrides,

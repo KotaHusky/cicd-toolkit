@@ -6,7 +6,6 @@ import { EcsExpressEdgeStack } from '../lib/stacks/ecs-express-edge-stack';
 
 const ENV = { account: '111111111111', region: 'us-east-1' };
 const ENDPOINT = 'ho-6aa8cf0a33c84998b3e7bd4906bbf686.ecs.us-east-1.on.aws';
-const TAGS = { Project: 'test', Environment: 'test', Repository: 'owner/repo' };
 
 // ---------------------------------------------------------------------------
 // SharedEdgeStack
@@ -15,7 +14,7 @@ const TAGS = { Project: 'test', Environment: 'test', Repository: 'owner/repo' };
 describe('SharedEdgeStack', () => {
   function makeSharedEdge(props?: Partial<ConstructorParameters<typeof SharedEdgeStack>[2]>) {
     const app = new cdk.App();
-    return new SharedEdgeStack(app, 'SharedEdge', { env: ENV, standardTags: TAGS, ...props });
+    return new SharedEdgeStack(app, 'SharedEdge', { env: ENV, ...props });
   }
 
   test('creates exactly one CachePolicy (NextImageCache)', () => {
@@ -93,7 +92,6 @@ describe('EcsExpressEdgeStack with sharedEdge', () => {
     const app = new cdk.App();
     return new EcsExpressEdgeStack(app, 'AppEdge', {
       env: ENV,
-      standardTags: TAGS,
       albDnsName: ENDPOINT,
       domainName: 'example.com',
       sharedEdge: {},
@@ -207,7 +205,6 @@ describe('EcsExpressEdgeStack with sharedEdge', () => {
     const template = Template.fromStack(
       new EcsExpressEdgeStack(app, 'AppEdge2', {
         env: ENV,
-        standardTags: TAGS,
         albDnsName: ENDPOINT,
         domainName: 'example.com',
         sharedEdge: { ssmPrefix: '/my-org/shared-edge' },
@@ -229,7 +226,6 @@ describe('EcsExpressEdgeStack without sharedEdge (backward compat)', () => {
     const app = new cdk.App();
     return new EcsExpressEdgeStack(app, 'TestEdge', {
       env: ENV,
-      standardTags: TAGS,
       albDnsName: ENDPOINT,
       domainName: 'example.com',
       ...overrides,

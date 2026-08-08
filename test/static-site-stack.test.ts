@@ -6,13 +6,11 @@ import { applyTags } from '../lib/constructs/standard-tags';
 import { StaticSiteDashboard } from '../lib/constructs/static-site-dashboard';
 
 const ENV = { account: '111111111111', region: 'us-east-1' };
-const TAGS = { Project: 'test', Environment: 'test', Repository: 'owner/repo' };
 
 function makeStack(overrides: Partial<ConstructorParameters<typeof StaticSiteStack>[2]> = {}) {
   const app = new cdk.App();
   return new StaticSiteStack(app, 'TestSite', {
     env: ENV,
-    standardTags: TAGS,
     domainName: 'site.example.com',
     hostedZoneName: 'example.com',
     ...overrides,
@@ -85,7 +83,7 @@ describe('StaticSiteStack', () => {
 
   test('default-domain mode: omits ACM, Route53, and distribution aliases', () => {
     const app = new cdk.App();
-    const stack = new StaticSiteStack(app, 'NoDomain', { env: ENV, standardTags: TAGS });
+    const stack = new StaticSiteStack(app, 'NoDomain', { env: ENV });
     const template = Template.fromStack(stack);
     template.resourceCountIs('AWS::CertificateManager::Certificate', 0);
     template.resourceCountIs('AWS::Route53::RecordSet', 0);
@@ -100,7 +98,7 @@ describe('StaticSiteStack', () => {
 
   test('default-domain mode: SiteUrl output points at distribution domain', () => {
     const app = new cdk.App();
-    const stack = new StaticSiteStack(app, 'NoDomain', { env: ENV, standardTags: TAGS });
+    const stack = new StaticSiteStack(app, 'NoDomain', { env: ENV });
     const template = Template.fromStack(stack);
     const outputs = template.findOutputs('SiteUrl');
     const siteUrl = Object.values(outputs)[0] as { Value: unknown };
@@ -113,7 +111,6 @@ describe('StaticSiteStack', () => {
     expect(() => {
       new StaticSiteStack(app, 'Bad', {
         env: ENV,
-        standardTags: TAGS,
         domainName: 'site.example.com',
         // hostedZoneName omitted on purpose
       });

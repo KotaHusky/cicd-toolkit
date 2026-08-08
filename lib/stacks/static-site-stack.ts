@@ -6,7 +6,6 @@ import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53Targets from 'aws-cdk-lib/aws-route53-targets';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
-import { StandardTags, applyStandardTags } from '../constructs/standard-tags';
 
 export interface StaticSiteStackProps extends cdk.StackProps {
   /** Custom domain (e.g. 'kiosk.example.org'). Omit to use the auto-generated
@@ -52,8 +51,6 @@ export interface StaticSiteStackProps extends cdk.StackProps {
    * hash routing); deep links into a preview 404-fall-back to production.
    */
   previewIndexRewrite?: boolean;
-  /** Cost-allocation tags. Project/Environment/Repository required. */
-  readonly standardTags: StandardTags;
 }
 
 /**
@@ -80,9 +77,8 @@ export class StaticSiteStack extends cdk.Stack {
   /** Only set when a custom domain is configured. */
   public readonly hostedZone?: route53.IHostedZone;
 
-  constructor(scope: Construct, id: string, props: StaticSiteStackProps) {
+  constructor(scope: Construct, id: string, props: StaticSiteStackProps = {}) {
     super(scope, id, props);
-    applyStandardTags(this, props.standardTags);
 
     if (props.domainName && !props.hostedZoneName) {
       throw new Error('StaticSiteStack: hostedZoneName is required when domainName is set.');

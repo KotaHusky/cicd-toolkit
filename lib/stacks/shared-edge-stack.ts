@@ -2,7 +2,6 @@ import * as cdk from 'aws-cdk-lib';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
-import { StandardTags, applyStandardTags } from '../constructs/standard-tags';
 
 /** SSM parameter name suffixes published by {@link SharedEdgeStack}. */
 /**
@@ -26,8 +25,6 @@ export interface SharedEdgeStackProps extends cdk.StackProps {
    * @default '/cicd-toolkit/edge'
    */
   ssmPrefix?: string;
-  /** Cost-allocation tags. Project/Environment/Repository required. */
-  readonly standardTags: StandardTags;
 }
 
 /**
@@ -88,11 +85,10 @@ export class SharedEdgeStack extends cdk.Stack {
   /** SSM parameter that holds {@link ssrResponseHeadersPolicy}.responseHeadersPolicyId. */
   public readonly ssrResponseHeadersPolicyIdParam: ssm.StringParameter;
 
-  constructor(scope: Construct, id: string, props: SharedEdgeStackProps) {
+  constructor(scope: Construct, id: string, props?: SharedEdgeStackProps) {
     super(scope, id, props);
-    applyStandardTags(this, props.standardTags);
 
-    this.ssmPrefix = normalizeSsmPrefix(props.ssmPrefix ?? '/cicd-toolkit/edge');
+    this.ssmPrefix = normalizeSsmPrefix(props?.ssmPrefix ?? '/cicd-toolkit/edge');
 
     // Next.js image optimizer: /_next/image?url=...&w=...&q=... — the query
     // string carries the params, so it must be forwarded AND keyed in the cache

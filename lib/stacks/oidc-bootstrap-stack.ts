@@ -1,7 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
-import { StandardTags, applyStandardTags } from '../constructs/standard-tags';
 
 export interface RepoRole {
   /** GitHub repo name (e.g. 'my-app') */
@@ -24,8 +23,6 @@ export interface OidcBootstrapStackProps extends cdk.StackProps {
   githubOrg: string;
   /** Per-repo role definitions */
   roles: RepoRole[];
-  /** Cost-allocation tags. Project/Environment/Repository required. */
-  readonly standardTags: StandardTags;
 }
 
 export class OidcBootstrapStack extends cdk.Stack {
@@ -34,7 +31,6 @@ export class OidcBootstrapStack extends cdk.Stack {
 
   constructor(scope: Construct, id: string, props: OidcBootstrapStackProps) {
     super(scope, id, props);
-    applyStandardTags(this, props.standardTags);
 
     this.oidcProvider = new iam.OpenIdConnectProvider(this, 'GitHubOidcProvider', {
       url: 'https://token.actions.githubusercontent.com',

@@ -11,11 +11,6 @@ new OidcBootstrapStack(app, 'OidcBootstrapStack', {
     region: process.env.CDK_DEFAULT_REGION ?? 'us-east-1',
   },
   githubOrg: 'KotaHusky',
-  standardTags: {
-    Project: 'cicd-toolkit',
-    Environment: 'shared',
-    Repository: 'KotaHusky/cicd-toolkit',
-  },
   roles: [
     {
       repo: 'telegram-bot',
