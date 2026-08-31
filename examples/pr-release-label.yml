@@ -1,0 +1,16 @@
+# Labels every PR with the semver release impact merging it will cause
+# (release:major / minor / patch / none), matching auto-version.yml's math.
+# `edited` is in the trigger so retitling a PR re-labels it; `synchronize`
+# is unnecessary because pushes don't change the title.
+name: PR Labels
+
+on:
+  pull_request:
+    types: [opened, edited, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  release-label:
+    uses: KotaHusky/cicd-toolkit/.github/workflows/pr-release-label.yml@main

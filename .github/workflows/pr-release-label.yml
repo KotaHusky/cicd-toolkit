@@ -1,0 +1,122 @@
+name: Reusable PR Release Label
+
+# Labels a PR with the semver release impact merging it will cause —
+# `release:major` / `release:minor` / `release:patch` / `release:none` —
+# computed from the PR title with the same rules auto-version.yml applies
+# to commits. In squash-merge repos the PR title becomes the commit subject
+# auto-version.yml later inspects, so the label is an exact preview of the
+# release math. Pair with commitlint.yml so titles are trustworthy.
+#
+# Call from a pull_request-triggered workflow with types
+# [opened, edited, reopened] — `edited` so retitling re-labels; `synchronize`
+# is unnecessary (pushes don't change the title). The step is idempotent:
+# when the correct label is already present it makes no writes, so callers
+# whose CI triggers on `labeled` are only re-triggered when the impact
+# actually changes.
+#
+# Fork PRs: the pull_request token is read-only for forks, so labeling is
+# skipped (not failed) when the head repo differs from the base repo.
+
+on:
+  workflow_call:
+    inputs:
+      label-prefix:
+        description: 'Prefix for the four release-impact labels'
+        required: false
+        type: string
+        default: 'release:'
+    outputs:
+      bump:
+        description: 'The computed release impact: major, minor, patch, or none'
+        value: ${{ jobs.label.outputs.bump }}
+
+permissions:
+  pull-requests: write
+
+jobs:
+  label:
+    name: Label release impact
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      bump: ${{ steps.apply.outputs.bump }}
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2
+        with:
+          egress-policy: audit
+
+      - name: Compute and apply release-impact label
+        id: apply
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          PREFIX: ${{ inputs.label-prefix }}
+        run: |
+          set -euo pipefail
+
+          # Same rules as auto-version.yml: bang type or BREAKING CHANGE
+          # footer → major, feat → minor, fix/perf/revert → patch. The
+          # footer is matched line-anchored in the PR body so prose that
+          # merely mentions the phrase can't force a major.
+          BUMP="none"
+          if printf '%s' "$PR_TITLE" | grep -qE '^[a-z]+(\([^)]*\))?!:'; then
+            BUMP="major"
+          elif printf '%s' "${PR_BODY:-}" | grep -qE '^BREAKING[ -]CHANGE:'; then
+            BUMP="major"
+          elif printf '%s' "$PR_TITLE" | grep -qE '^feat(\([^)]*\))?:'; then
+            BUMP="minor"
+          elif printf '%s' "$PR_TITLE" | grep -qE '^(fix|perf|revert)(\([^)]*\))?:'; then
+            BUMP="patch"
+          fi
+          echo "bump=${BUMP}" >> "$GITHUB_OUTPUT"
+
+          if [ "$IS_FORK" = "true" ]; then
+            echo "::notice title=pr-release-label::Fork PR — token is read-only, skipping labels (impact: ${BUMP})."
+            exit 0
+          fi
+
+          case "$BUMP" in
+            major) COLOR="b60205"; DESC="Merging this PR causes a major release" ;;
+            minor) COLOR="0e8a16"; DESC="Merging this PR causes a minor release" ;;
+            patch) COLOR="fbca04"; DESC="Merging this PR causes a patch release" ;;
+            none)  COLOR="ededed"; DESC="Merging this PR causes no release" ;;
+          esac
+          WANT="${PREFIX}${BUMP}"
+
+          encode() { jq -rn --arg v "$1" '$v|@uri'; }
+
+          CURRENT=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/labels" --jq '.[].name')
+
+          # Idempotence: correct label already present and no stale
+          # siblings → no writes, so `labeled`-triggered CI isn't re-run.
+          STALE=""
+          for B in major minor patch none; do
+            L="${PREFIX}${B}"
+            if [ "$L" != "$WANT" ] && printf '%s\n' "$CURRENT" | grep -qxF "$L"; then
+              STALE="${STALE} ${L}"
+            fi
+          done
+          if [ -z "$STALE" ] && printf '%s\n' "$CURRENT" | grep -qxF "$WANT"; then
+            echo "Already labeled ${WANT} — nothing to do."
+            exit 0
+          fi
+
+          for L in $STALE; do
+            gh api -X DELETE "repos/${REPO}/issues/${PR_NUMBER}/labels/$(encode "$L")" > /dev/null
+          done
+
+          # Create the label on first use so consumers need no setup.
+          if ! gh api "repos/${REPO}/labels/$(encode "$WANT")" > /dev/null 2>&1; then
+            gh api "repos/${REPO}/labels" \
+              -f name="$WANT" -f color="$COLOR" -f description="$DESC" > /dev/null
+          fi
+
+          if ! printf '%s\n' "$CURRENT" | grep -qxF "$WANT"; then
+            gh api "repos/${REPO}/issues/${PR_NUMBER}/labels" -f "labels[]=${WANT}" > /dev/null
+          fi
+          echo "Labeled #${PR_NUMBER} as ${WANT}."
