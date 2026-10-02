@@ -230,7 +230,7 @@ jobs:
 |-------|------|---------|-------------|
 | `bucket-name` | string | — | S3 bucket hosting the site (required) |
 | `distribution-id` | string | `''` | CloudFront distribution to invalidate. Omit for a bucket fronted by something else — invalidation is skipped when empty |
-| `tags` | string | `''` | Cost-allocation tags as space-separated `Key=Value` pairs, stamped onto the bucket. **`Project` and `Environment` are required** — the deploy fails before the sync without them. `Repository` is added automatically from `github.repository`. Merged into the bucket's existing tags, so tags applied elsewhere (including CloudFormation's `aws:*` system tags) survive |
+| `tags` | string | `''` | Cost-allocation tags as space-separated `Key=Value` pairs, stamped onto the bucket. **`Project` and `Environment` are required** — the deploy fails before the sync without them. `Repository` is added automatically from `github.repository`. Merged into the bucket's existing tags, so tags applied elsewhere (including CloudFormation's `aws:*` system tags) survive. The merge never prunes: removing a key from `tags` leaves it on the bucket, so retiring a tag has to be done outside this workflow |
 | `aws-region` | string | `us-east-1` | AWS region for the bucket |
 | `node-version` | string | `24` | Node.js version |
 | `package-manager` | string | `npm` | `npm` or `pnpm` |
