@@ -246,7 +246,7 @@ jobs:
 
 | Secret | Required | Description |
 |--------|----------|-------------|
-| `role-arn` | yes | OIDC role for the deploy. Needs `s3:ListBucket` + `s3:GetObject`/`PutObject`/`DeleteObject` for the sync, `s3:GetBucketTagging` + `s3:PutBucketTagging` to stamp the bucket tags (the read is what lets tagging merge rather than overwrite), and `cloudfront:CreateInvalidation` + `cloudfront:GetInvalidation` when `distribution-id` is set |
+| `role-arn` | yes | OIDC role for the deploy. Needs `s3:ListBucket` + `s3:GetObject`/`PutObject`/`DeleteObject` for the sync, `s3:PutBucketTagging` to stamp the bucket tags, and `cloudfront:CreateInvalidation` + `cloudfront:GetInvalidation` when `distribution-id` is set. `s3:GetBucketTagging` is strongly recommended: without it the tags are overwritten rather than merged (the deploy warns and continues), which fails outright on a bucket carrying CloudFormation's `aws:*` system tags |
 
 | Output | Description |
 |--------|-------------|

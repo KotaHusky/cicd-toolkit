@@ -355,6 +355,9 @@ jobs:
           DESIRED: ${{ steps.tags.outputs.tags-json }}
         run: |
           set -euo pipefail
+          # Per-job, so a concurrent or earlier job on a shared self-hosted runner
+          # can't leave a stale file for the greps below to match.
+          ERR="${RUNNER_TEMP}/get-bucket-tagging.err"
           # PutBucketTagging REPLACES the whole tag set — every tag absent from the
           # request is deleted. AWS will not let a requester delete its reserved
           # aws:* system tags, so a blind replace fails on any bucket CloudFormation
@@ -366,20 +369,26 @@ jobs:
           # Merging also means a tag the bucket's own stack applies (e.g. a CDK
           # stack-level tag) is not stripped and re-added on alternating deploys.
           if ! EXISTING=$(aws s3api get-bucket-tagging --bucket "${BUCKET}" \
-                            --query TagSet --output json 2>/tmp/get-bucket-tagging.err); then
-            if grep -q 'NoSuchTagSet' /tmp/get-bucket-tagging.err; then
+                            --query TagSet --output json 2>"${ERR}"); then
+            if grep -q 'NoSuchTagSet' "${ERR}"; then
               # Untagged bucket — nothing to preserve. Not an error.
+              EXISTING='[]'
+            elif grep -q 'AccessDenied' "${ERR}"; then
+              # s3:GetBucketTagging is a SOFT requirement, so adding the read here
+              # does not break consumers whose role predates it. Without the current
+              # tags the only thing we can send is the desired set — the old replace
+              # behaviour, which is still correct for a bucket carrying no aws:*
+              # system tags. A bucket that has them fails at the put below, exactly
+              # as it did before this read existed, and the warning names the fix.
+              echo "::warning title=Bucket tags will be overwritten::Reading the bucket's current tags was denied, so they will be replaced rather than merged. Grant the deploy role s3:GetBucketTagging on the bucket so tags applied elsewhere (including CloudFormation's aws:* system tags) survive."
+              cat "${ERR}" >&2
               EXISTING='[]'
             else
               # Only a denial points at the permission; NoSuchBucket, expired
               # credentials and throttling land here too, and telling those to
               # grant GetBucketTagging would send them after the wrong fix.
-              HINT=""
-              if grep -q 'AccessDenied' /tmp/get-bucket-tagging.err; then
-                HINT=" Grant the deploy role s3:GetBucketTagging on the bucket."
-              fi
-              echo "::error title=Cannot read bucket tags::This step needs the bucket's current tags in order to merge rather than overwrite them.${HINT} Underlying error:"
-              cat /tmp/get-bucket-tagging.err >&2
+              echo "::error title=Cannot read bucket tags::This step needs the bucket's current tags in order to merge rather than overwrite them. Underlying error:"
+              cat "${ERR}" >&2
               exit 1
             fi
           fi
