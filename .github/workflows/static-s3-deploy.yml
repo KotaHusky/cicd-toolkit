@@ -371,7 +371,14 @@ jobs:
               # Untagged bucket — nothing to preserve. Not an error.
               EXISTING='[]'
             else
-              echo "::error title=Cannot read bucket tags::Reading the bucket's current tags failed, which this step needs in order to merge rather than overwrite them. Grant the deploy role s3:GetBucketTagging on the bucket. Underlying error:"
+              # Only a denial points at the permission; NoSuchBucket, expired
+              # credentials and throttling land here too, and telling those to
+              # grant GetBucketTagging would send them after the wrong fix.
+              HINT=""
+              if grep -q 'AccessDenied' /tmp/get-bucket-tagging.err; then
+                HINT=" Grant the deploy role s3:GetBucketTagging on the bucket."
+              fi
+              echo "::error title=Cannot read bucket tags::This step needs the bucket's current tags in order to merge rather than overwrite them.${HINT} Underlying error:"
               cat /tmp/get-bucket-tagging.err >&2
               exit 1
             fi
