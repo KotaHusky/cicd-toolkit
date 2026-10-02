@@ -402,6 +402,15 @@ jobs:
             (($existing | to_map) + ($desired | to_map))
               | to_entries | map({Key: .key, Value: .value})
           ')
+          # Merging can exceed S3's 50-tag ceiling where a bare replace could not,
+          # since the total is now the bucket's tags plus the caller's. Name the
+          # limit rather than letting the put fail with a bare InvalidTag — this
+          # runs after the sync, so a cryptic error here is expensive to read.
+          COUNT=$(jq 'length' <<<"${MERGED}")
+          if [ "${COUNT}" -gt 50 ]; then
+            echo "::error title=Too many bucket tags::Merging the deploy tags into the bucket's existing ones would leave ${COUNT} tags, and S3 allows at most 50 per bucket. Drop tags from the bucket, or narrow the 'tags' input."
+            exit 1
+          fi
           aws s3api put-bucket-tagging \
             --bucket "${BUCKET}" \
             --tagging "{\"TagSet\":${MERGED}}"
