@@ -244,6 +244,11 @@ jobs:
           TAGS_IN: ${{ inputs.tags }}
         run: |
           set -euo pipefail
+          # The loops below word-split TAGS_IN deliberately, which also exposes it
+          # to pathname expansion: a glob character in a tag value can match a file
+          # in the checkout and be silently rewritten to that filename. Nothing
+          # here needs globbing, so turn it off.
+          set -f
           HAS_PROJECT=0
           HAS_ENV=0
           HAS_REPO=0
