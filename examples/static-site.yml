@@ -35,6 +35,9 @@ jobs:
       bucket-name: my-site-bucket
       distribution-id: E1234567ABCDEF
       aws-region: us-east-1
+      # Required: Project and Environment. The deploy fails before the sync
+      # without them. Repository is added automatically from github.repository.
+      tags: 'Project=my-app Environment=prod'
       # Next.js with `output: 'export'` → 'out'. Vite → 'dist'. Astro → 'dist'.
       build-output-dir: out
       # Any build-time env vars the static site needs baked in.

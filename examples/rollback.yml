@@ -41,6 +41,10 @@ jobs:
       bucket-name: my-app-static-bucket        # <-- your S3 bucket name
       distribution-id: EXAMPLEXXXXX            # <-- your CloudFront distribution ID
 
+      # Required: Project and Environment. The deploy fails before the sync
+      # without them. Repository is added automatically from github.repository.
+      tags: 'Project=my-app Environment=prod'
+
       # Optional: wire a GitHub environment for protection rules / scoped secrets.
       # environment: production
 

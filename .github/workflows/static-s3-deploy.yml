@@ -244,27 +244,24 @@ jobs:
           TAGS_IN: ${{ inputs.tags }}
         run: |
           set -euo pipefail
-          ENTRIES=""
+          # The loops below word-split TAGS_IN deliberately, which also exposes it
+          # to pathname expansion: a glob character in a tag value can match a file
+          # in the checkout and be silently rewritten to that filename. Nothing
+          # here needs globbing, so turn it off.
+          set -f
           HAS_PROJECT=0
           HAS_ENV=0
           HAS_REPO=0
           # tags is a space-separated list of Key=Value pairs; word-splitting is
-          # intentional so each pair becomes its own TagSet entry.
+          # intentional so each pair is inspected on its own.
           # shellcheck disable=SC2086
           for PAIR in ${TAGS_IN}; do
-            KEY="${PAIR%%=*}"
-            VAL="${PAIR#*=}"
-            ENTRIES="${ENTRIES}${ENTRIES:+,}{Key=${KEY},Value=${VAL}}"
-            case "${KEY}" in
-              Project)     [ -n "${VAL}" ] && HAS_PROJECT=1 ;;
-              Environment) [ -n "${VAL}" ] && HAS_ENV=1 ;;
+            case "${PAIR%%=*}" in
+              Project)     [ -n "${PAIR#*=}" ] && HAS_PROJECT=1 ;;
+              Environment) [ -n "${PAIR#*=}" ] && HAS_ENV=1 ;;
               Repository)  HAS_REPO=1 ;;
             esac
           done
-          # Auto-add Repository from the calling repo unless the caller set it.
-          if [ "${HAS_REPO}" = "0" ]; then
-            ENTRIES="${ENTRIES}${ENTRIES:+,}{Key=Repository,Value=${REPO}}"
-          fi
           # Enforce the required cost-allocation tags (fail fast before sync).
           MISSING=""
           [ "${HAS_PROJECT}" = "0" ] && MISSING="${MISSING} Project"
@@ -273,7 +270,21 @@ jobs:
             echo "::error title=Missing required tags::static-s3-deploy requires these tag(s) via the 'tags' input:${MISSING}. Example: tags: \"Project=homepage Environment=prod\" (Repository is added automatically)."
             exit 1
           fi
-          echo "tagset=TagSet=[${ENTRIES}]" >> "$GITHUB_OUTPUT"
+          # Emit the desired tags as a JSON TagSet so the tagging step can MERGE
+          # them into the bucket's current tags with jq, rather than doing a blind
+          # replace (see "Tag S3 bucket" below for why that matters). A tab
+          # separator keeps values containing '=' intact.
+          # shellcheck disable=SC2086
+          DESIRED=$(
+            for PAIR in ${TAGS_IN}; do
+              printf '%s\t%s\n' "${PAIR%%=*}" "${PAIR#*=}"
+            done | jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {Key: .[0], Value: .[1]})'
+          )
+          # Auto-add Repository from the calling repo unless the caller set it.
+          if [ "${HAS_REPO}" = "0" ]; then
+            DESIRED=$(jq -cn --argjson d "${DESIRED}" --arg r "${REPO}" '$d + [{Key: "Repository", Value: $r}]')
+          fi
+          echo "tags-json=${DESIRED}" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Deployment (DORA tracking)
         id: gh-deploy
@@ -344,10 +355,65 @@ jobs:
 
       - name: Tag S3 bucket
         shell: bash
+        env:
+          BUCKET: ${{ inputs.bucket-name }}
+          DESIRED: ${{ steps.tags.outputs.tags-json }}
         run: |
+          set -euo pipefail
+          # Per-job, so a concurrent or earlier job on a shared self-hosted runner
+          # can't leave a stale file for the greps below to match.
+          ERR="${RUNNER_TEMP}/get-bucket-tagging.err"
+          # PutBucketTagging REPLACES the whole tag set — every tag absent from the
+          # request is deleted. AWS will not let a requester delete its reserved
+          # aws:* system tags, so a blind replace fails on any bucket CloudFormation
+          # or CDK owns (those carry aws:cloudformation:*) with:
+          #   InvalidTag: System tags cannot be removed by requester
+          # There is no value of `tags` that avoids this, because callers cannot set
+          # aws:*-prefixed keys themselves. So read the current set and merge: every
+          # existing tag survives, and the desired tags are added or updated.
+          # Merging also means a tag the bucket's own stack applies (e.g. a CDK
+          # stack-level tag) is not stripped and re-added on alternating deploys.
+          if ! EXISTING=$(aws s3api get-bucket-tagging --bucket "${BUCKET}" \
+                            --query TagSet --output json 2>"${ERR}"); then
+            if grep -q 'NoSuchTagSet' "${ERR}"; then
+              # Untagged bucket — nothing to preserve. Not an error.
+              EXISTING='[]'
+            elif grep -q 'AccessDenied' "${ERR}"; then
+              # s3:GetBucketTagging is a SOFT requirement, so adding the read here
+              # does not break consumers whose role predates it. Without the current
+              # tags the only thing we can send is the desired set — the old replace
+              # behaviour, which is still correct for a bucket carrying no aws:*
+              # system tags. A bucket that has them fails at the put below, exactly
+              # as it did before this read existed, and the warning names the fix.
+              echo "::warning title=Bucket tags will be overwritten::Reading the bucket's current tags was denied, so they will be replaced rather than merged. Grant the deploy role s3:GetBucketTagging on the bucket so tags applied elsewhere (including CloudFormation's aws:* system tags) survive."
+              cat "${ERR}" >&2
+              EXISTING='[]'
+            else
+              # Only a denial points at the permission; NoSuchBucket, expired
+              # credentials and throttling land here too, and telling those to
+              # grant GetBucketTagging would send them after the wrong fix.
+              echo "::error title=Cannot read bucket tags::This step needs the bucket's current tags in order to merge rather than overwrite them. Underlying error:"
+              cat "${ERR}" >&2
+              exit 1
+            fi
+          fi
+          MERGED=$(jq -cn --argjson existing "${EXISTING}" --argjson desired "${DESIRED}" '
+            def to_map: map({(.Key): .Value}) | add // {};
+            (($existing | to_map) + ($desired | to_map))
+              | to_entries | map({Key: .key, Value: .value})
+          ')
+          # Merging can exceed S3's 50-tag ceiling where a bare replace could not,
+          # since the total is now the bucket's tags plus the caller's. Name the
+          # limit rather than letting the put fail with a bare InvalidTag — this
+          # runs after the sync, so a cryptic error here is expensive to read.
+          COUNT=$(jq 'length' <<<"${MERGED}")
+          if [ "${COUNT}" -gt 50 ]; then
+            echo "::error title=Too many bucket tags::Merging the deploy tags into the bucket's existing ones would leave ${COUNT} tags, and S3 allows at most 50 per bucket. Drop tags from the bucket, or narrow the 'tags' input."
+            exit 1
+          fi
           aws s3api put-bucket-tagging \
-            --bucket "${{ inputs.bucket-name }}" \
-            --tagging "${{ steps.tags.outputs.tagset }}"
+            --bucket "${BUCKET}" \
+            --tagging "{\"TagSet\":${MERGED}}"
 
       - name: Invalidate CloudFront cache
         id: invalidate
