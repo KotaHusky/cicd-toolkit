@@ -220,6 +220,7 @@ jobs:
     with:
       bucket-name: my-site-bucket
       distribution-id: E1234567ABCDEF
+      tags: 'Project=my-app Environment=prod'   # Project + Environment required
       build-output-dir: out          # Next 'out' / Vite 'dist' / Astro 'dist'
     secrets:
       role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
@@ -228,7 +229,8 @@ jobs:
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
 | `bucket-name` | string | — | S3 bucket hosting the site (required) |
-| `distribution-id` | string | — | CloudFront distribution to invalidate (required) |
+| `distribution-id` | string | `''` | CloudFront distribution to invalidate. Omit for a bucket fronted by something else — invalidation is skipped when empty |
+| `tags` | string | `''` | Cost-allocation tags as space-separated `Key=Value` pairs, stamped onto the bucket. **`Project` and `Environment` are required** — the deploy fails before the sync without them. `Repository` is added automatically from `github.repository`. Merged into the bucket's existing tags, so tags applied elsewhere (including CloudFormation's `aws:*` system tags) survive |
 | `aws-region` | string | `us-east-1` | AWS region for the bucket |
 | `node-version` | string | `24` | Node.js version |
 | `package-manager` | string | `npm` | `npm` or `pnpm` |
@@ -244,7 +246,7 @@ jobs:
 
 | Secret | Required | Description |
 |--------|----------|-------------|
-| `role-arn` | yes | OIDC role with `s3:Sync` and `cloudfront:CreateInvalidation` on the target resources |
+| `role-arn` | yes | OIDC role for the deploy. Needs `s3:ListBucket` + `s3:GetObject`/`PutObject`/`DeleteObject` for the sync, `s3:GetBucketTagging` + `s3:PutBucketTagging` to stamp the bucket tags (the read is what lets tagging merge rather than overwrite), and `cloudfront:CreateInvalidation` + `cloudfront:GetInvalidation` when `distribution-id` is set |
 
 | Output | Description |
 |--------|-------------|
